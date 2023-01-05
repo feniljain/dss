@@ -1,13 +1,13 @@
 use nix::{
     sys::wait::waitpid,
-    unistd::{execve, fork, ForkResult},
+    unistd::{chdir, execve, fork, ForkResult},
 };
 use signal_hook::consts;
 use std::{
     ffi::CString,
     io::{self, Write},
     os::unix::prelude::OsStrExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -15,7 +15,7 @@ use std::{
     },
 };
 
-// const BUILTIN_COMMANDS: [&str; 1] = ["cd"];
+const BUILTIN_COMMANDS: [&str; 1] = ["cd"];
 
 #[derive(Default, Clone, Debug)]
 struct Command {
@@ -29,14 +29,15 @@ struct Command {
 // [X] correct command split by space
 // [X] handle empty commands
 // [X] add / ./ handling
-// [] correct path parsing and argument parsing according to the `man execve`
+// [X] correct path parsing and argument parsing according to the `man execve`
 // [] use current directory path in env paths
 // [] add Ctrl-C + Ctrl-D handling
-// [] pass stage 1 tests
+// [X] pass stage 1 tests
 // [] parsing all paths
-// [] trying all paths robustly
+// [X] trying all paths robustly
 // [] use exit status of wait: The Unix convention is that a zero exit status represents success, and any non-zero exit status represents failure.
-// [] implement your own `cd` in C
+// [X] implement your own `cd` in C
+// [X] implement `cd` builtin in your own shell
 // [] add support for multiline commands
 //
 // Bonus
@@ -115,38 +116,51 @@ fn main() -> io::Result<()> {
                 .collect(),
         };
 
-        match unsafe { fork() } {
-            Ok(ForkResult::Parent { child, .. }) => {
-                waitpid(child, None)
-                    .expect(&format!("Expected to wait for child with pid: {:?}", child));
-            }
-            Ok(ForkResult::Child) => {
-                // FIXME: Optimize this .len() out,
-                // we just wanna know if there are more
-                // than 1 elements
-                let args: &[CString] = if command.args.len() < 1 {
-                    &[]
-                } else {
-                    &command.args
-                };
-
-                // If command starts with "/" or "./" or "../", do not do PATH appending
-                if evaluate_with_path_env {
-                    for env_path_str in env_paths {
-                        let mut path = PathBuf::from_str(env_path_str)
-                            .expect("Could not construct path buf from env_path");
-
-                        path.push(command.path.clone());
-
-                        execve_(&path, args)
-                    }
-                } else {
-                    execve_(&command.path, args);
+        if is_builtin_command(args_with_cmd[0]) {
+            let mut path_to_go_str = "/";
+            if args_with_cmd.len() > 1 {
+                // If we receive `~` after cd, we want to go to
+                // absolute root, which is what "/" denotes already
+                if path_to_go_str != "~" {
+                    path_to_go_str = args_with_cmd[1];
                 }
-
-                unsafe { libc::_exit(0) };
             }
-            Err(err) => panic!("Fork failed: {err:?}"),
+
+            handle_builtin_command(&args_with_cmd[0], path_to_go_str)?;
+        } else {
+            match unsafe { fork() } {
+                Ok(ForkResult::Parent { child, .. }) => {
+                    waitpid(child, None)
+                        .expect(&format!("Expected to wait for child with pid: {:?}", child));
+                }
+                Ok(ForkResult::Child) => {
+                    // FIXME: Optimize this .len() out,
+                    // we just wanna know if there are more
+                    // than 1 elements
+                    let args: &[CString] = if command.args.len() < 1 {
+                        &[]
+                    } else {
+                        &command.args
+                    };
+
+                    // If command starts with "/" or "./" or "../", do not do PATH appending
+                    if evaluate_with_path_env {
+                        for env_path_str in env_paths {
+                            let mut path = PathBuf::from_str(env_path_str)
+                                .expect("Could not construct path buf from env_path");
+
+                            path.push(command.path.clone());
+
+                            execve_(&path, args)
+                        }
+                    } else {
+                        execve_(&command.path, args);
+                    }
+
+                    unsafe { libc::_exit(0) };
+                }
+                Err(err) => panic!("Fork failed: {err:?}"),
+            }
         }
     }
 
@@ -165,4 +179,17 @@ fn execve_(path: &PathBuf, args: &[CString]) {
     // }
 
     let _ = execve::<CString, CString>(&path, args, &[]);
+}
+
+fn is_builtin_command(cmd: &str) -> bool {
+    BUILTIN_COMMANDS.contains(&cmd)
+}
+
+fn handle_builtin_command(cmd_str: &str, path_to_go_str: &str) -> io::Result<()> {
+    if cmd_str == "cd" {
+        let cmd_path = Path::new(path_to_go_str);
+        chdir(cmd_path)?;
+    }
+
+    Ok(())
 }

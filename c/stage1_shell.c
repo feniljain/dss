@@ -26,6 +26,12 @@ int main() {
     }
 
     child_pid = fork();
+    if (child_pid < 0) {
+      perror("Fork failed");
+      // This exits entire program
+      exit(1);
+    }
+
     if (child_pid == 0) {
       if (strcmp(command[0], "cd") == 0) {
         /* cwd(); */
@@ -36,7 +42,13 @@ int main() {
         cwd();
       } else {
         /* Never returns if the call is successful */
-        execvp(command[0], command);
+        if (execvp(command[0], command) < 0) {
+          perror(command[0]);
+          // This exits child program
+          // Explanation:
+          // https://indradhanush.github.io/blog/writing-a-unix-shell-part-2/
+          exit(1);
+        }
         printf("This won't be printed if execvp is successul\n");
       }
       /* printf("Result from chdir: %d\n", result); */
