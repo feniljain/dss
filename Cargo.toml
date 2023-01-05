@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 libc = "0.2.139"
 nix = "0.26.1"
+signal-hook = "0.3.14"
