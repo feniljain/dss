@@ -49,8 +49,8 @@ enum Color {
 // [X] use exit status of wait: The Unix convention is that a zero exit status represents success, and any non-zero exit status represents failure.
 // [X] implement your own `cd` in C
 // [X] implement `cd` builtin in your own shell
-// [] print error messages according to errno
-//      [] for invalid path command ( e.g. ./a.sh ) give no such file or directory error
+// [X] print error messages according to errno
+//      [X] for invalid path command ( e.g. ./a.sh ) give no such file or directory error
 // [] after stage 1 refactor code to have a separate engine and cmd parsing module
 //
 // Bonus
@@ -190,8 +190,8 @@ fn main() -> anyhow::Result<()> {
 
                     // If command starts with "/" or "./" or "../", do not do PATH appending
                     let mut exit_status = 0;
+                    let mut errno_opt: Option<Errno> = None;
                     if is_unqualified_path {
-                        let mut errno_opt: Option<Errno> = None;
                         'env_paths: for env_path_str in env_paths {
                             let mut path = PathBuf::from_str(&env_path_str)
                                 .expect("Could not construct path buf from env_path");
@@ -212,19 +212,17 @@ fn main() -> anyhow::Result<()> {
                                 }
                             }
                         }
-
-                        if let Some(errno) = errno_opt {
-                            write_error_to_shell(errno, cmd_str)?;
-                            // FIXME: Pass proper errno here
-                            exit_status = 1;
-                        }
                     } else {
                         let result = execve_(&command.path, args);
                         if let Err(errno) = result {
-                            write_error_to_shell(errno, cmd_str)?;
-                            // FIXME: Pass proper errno here
-                            exit_status = 1;
+                            errno_opt = Some(errno);
                         }
+                    }
+
+                    if let Some(errno) = errno_opt {
+                        write_error_to_shell(errno, cmd_str, is_unqualified_path)?;
+                        // FIXME: Pass proper errno here
+                        exit_status = 1;
                     }
 
                     unsafe { libc::_exit(exit_status) };
@@ -302,8 +300,16 @@ fn write_to_shell_colored(output: &str, color: Color) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn write_error_to_shell(errno: Errno, cmd_str: String) -> anyhow::Result<()> {
-    write_to_shell(&format!("dss: {}: {}\n", errno.desc(), cmd_str))?;
+fn write_error_to_shell(
+    errno: Errno,
+    cmd_str: String,
+    is_unqualified_path: bool,
+) -> anyhow::Result<()> {
+    if is_unqualified_path {
+        write_to_shell(&format!("dss: command not found: {}\n", cmd_str))?;
+    } else {
+        write_to_shell(&format!("dss: {}: {}\n", errno.desc(), cmd_str))?;
+    }
 
     Ok(())
 }
