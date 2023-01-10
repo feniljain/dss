@@ -97,6 +97,11 @@ fn main() -> anyhow::Result<()> {
 
         if args_with_cmd[0] == "!" {
             args_with_cmd.remove(0);
+
+            if args_with_cmd.len() == 0 {
+                args_with_cmd.push("true")
+            }
+
             negate_exit_status = true;
         }
 
