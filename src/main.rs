@@ -1,10 +1,11 @@
+use libc::getenv;
 use nix::{
     sys::wait::waitpid,
     unistd::{chdir, execve, fork, ForkResult},
 };
 use signal_hook::consts;
 use std::{
-    ffi::CString,
+    ffi::{CStr, CString},
     io::{self, Write},
     os::unix::prelude::OsStrExt,
     path::{Path, PathBuf},
@@ -33,8 +34,9 @@ struct Command {
 // [] use current directory path in env paths
 // [] add Ctrl-C + Ctrl-D handling
 // [X] pass stage 1 tests
-// [] parsing all paths
+// [X] parsing all paths
 // [X] trying all paths robustly
+// [] proper handling for command not found
 // [] use exit status of wait: The Unix convention is that a zero exit status represents success, and any non-zero exit status represents failure.
 // [X] implement your own `cd` in C
 // [X] implement `cd` builtin in your own shell
@@ -45,7 +47,7 @@ struct Command {
 fn main() -> io::Result<()> {
     io::stdout().write_all(b"Welcome to Dead Simple Shell!\n")?;
 
-    let env_paths = vec!["/bin/", "/usr/bin/"];
+    let env_paths = parse_paths();
 
     let term = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(consts::SIGINT, Arc::clone(&term))?;
@@ -75,7 +77,8 @@ fn main() -> io::Result<()> {
         let cmd_path = PathBuf::from_str(&args_with_cmd[0])
             .expect("Could not construct path buf from command");
 
-        let mut evaluate_with_path_env = false;
+        // Unqualified path = A path not starting with "/" or "../" or "./"
+        let mut is_unqualified_path = false;
 
         let command = Command {
             path: cmd_path.clone(),
@@ -100,7 +103,7 @@ fn main() -> io::Result<()> {
                                     .expect("Could not construct CString path"),
                             )
                         } else {
-                            evaluate_with_path_env = true;
+                            is_unqualified_path = true;
                             Some(
                                 CString::new(args_with_cmd[0])
                                     .expect("Could not construct CString path"),
@@ -144,12 +147,13 @@ fn main() -> io::Result<()> {
                     };
 
                     // If command starts with "/" or "./" or "../", do not do PATH appending
-                    if evaluate_with_path_env {
+                    if is_unqualified_path {
                         for env_path_str in env_paths {
-                            let mut path = PathBuf::from_str(env_path_str)
+                            let mut path = PathBuf::from_str(&env_path_str)
                                 .expect("Could not construct path buf from env_path");
 
                             path.push(command.path.clone());
+                            println!("Trying path: {:?}", path);
 
                             execve_(&path, args)
                         }
@@ -192,4 +196,15 @@ fn handle_builtin_command(cmd_str: &str, path_to_go_str: &str) -> io::Result<()>
     }
 
     Ok(())
+}
+
+fn parse_paths() -> Vec<String> {
+    let path_cstring = CString::new("PATH").expect("could not construct PATH C String");
+    let envs_cstr: CString = unsafe { CStr::from_ptr(getenv(path_cstring.as_ptr())) }.into();
+    return envs_cstr
+        .to_str()
+        .expect("could not parse concenated path str")
+        .split(":")
+        .map(|x| String::from(x))
+        .collect();
 }
