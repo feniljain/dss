@@ -1,6 +1,6 @@
 use libc::getenv;
 use nix::{
-    sys::wait::waitpid,
+    sys::wait::{waitpid, WaitStatus},
     unistd::{chdir, execve, fork, ForkResult},
 };
 use signal_hook::consts;
@@ -38,6 +38,7 @@ struct Command {
 // [X] parsing all paths
 // [X] trying all paths robustly
 // [X] proper handling for command not found
+// [] include handling of `!` while parsing and also while checking exit status
 // [] use exit status of wait: The Unix convention is that a zero exit status represents success, and any non-zero exit status represents failure.
 // [X] implement your own `cd` in C
 // [X] implement `cd` builtin in your own shell
@@ -134,8 +135,16 @@ fn main() -> io::Result<()> {
         } else {
             match unsafe { fork() } {
                 Ok(ForkResult::Parent { child, .. }) => {
-                    waitpid(child, None)
+                    let wait_status = waitpid(child, None)
                         .expect(&format!("Expected to wait for child with pid: {:?}", child));
+                    match wait_status {
+                        WaitStatus::Exited(_pid, exit_code) => {
+                            if exit_code != 0 {
+                                println!("Execution failed!");
+                            }
+                        }
+                        _ => write_to_shell(&format!("Did not get exited: {:?}", wait_status))?,
+                    }
                 }
                 Ok(ForkResult::Child) => {
                     // FIXME: Optimize this .len() out,
