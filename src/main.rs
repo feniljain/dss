@@ -45,27 +45,30 @@ enum Color {
 // [X] parsing all paths
 // [X] trying all paths robustly
 // [X] proper handling for command not found
-// [] include handling of `!` while parsing and also while checking exit status
+// [X] include handling of `!` while parsing and also while checking exit status
 // [X] use exit status of wait: The Unix convention is that a zero exit status represents success, and any non-zero exit status represents failure.
 // [X] implement your own `cd` in C
 // [X] implement `cd` builtin in your own shell
-// [] add support for multiline commands
+// [] print error messages according to errno
+//      [] for invalid path command ( e.g. ./a.sh ) give no such file or directory error
 // [] after stage 1 refactor code to have a separate engine and cmd parsing module
-// [] for invalid path command ( e.g. ./a.sh ) give no such file or directory error
 //
 // Bonus
 // [X] add color depending on exit status
 // [] add last segment of current folder like my own zsh with some color
+// [] add support for multiline commands
 
 fn main() -> anyhow::Result<()> {
     write_to_shell("Welcome to Dead Simple Shell!\n")?;
 
+    // FIXME: Move all variables here to engine/command struct
     let env_paths = parse_paths();
 
     let term = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(consts::SIGINT, Arc::clone(&term))?;
 
     let mut execution_successful = true;
+    let mut negate_exit_status;
 
     while !term.load(Ordering::Relaxed) {
         if !execution_successful {
@@ -73,6 +76,8 @@ fn main() -> anyhow::Result<()> {
         } else {
             write_to_shell_colored("$ ", Color::Green)?;
         }
+
+        negate_exit_status = false;
 
         let mut cmd_str = String::new();
 
@@ -88,7 +93,12 @@ fn main() -> anyhow::Result<()> {
             break;
         }
 
-        let args_with_cmd: Vec<&str> = cmd_str.split_ascii_whitespace().collect();
+        let mut args_with_cmd: Vec<&str> = cmd_str.split_ascii_whitespace().collect();
+
+        if args_with_cmd[0] == "!" {
+            args_with_cmd.remove(0);
+            negate_exit_status = true;
+        }
 
         let cmd_path = PathBuf::from_str(&args_with_cmd[0])
             .expect("Could not construct path buf from command");
@@ -153,7 +163,16 @@ fn main() -> anyhow::Result<()> {
                     let wait_status = waitpid(child, None)
                         .expect(&format!("Expected to wait for child with pid: {:?}", child));
                     match wait_status {
-                        WaitStatus::Exited(_pid, exit_code) => {
+                        WaitStatus::Exited(_pid, mut exit_code) => {
+                            // FIXME: Ugly if/else, replace
+                            // with binary operations
+                            if negate_exit_status {
+                                if exit_code == 0 {
+                                    exit_code = 1;
+                                } else {
+                                    exit_code = 0;
+                                }
+                            }
                             execution_successful = exit_code == 0;
                         }
                         _ => write_to_shell(&format!("Did not get exited: {:?}", wait_status))?,
@@ -170,36 +189,45 @@ fn main() -> anyhow::Result<()> {
                     };
 
                     // If command starts with "/" or "./" or "../", do not do PATH appending
+                    let mut exit_status = 0;
                     if is_unqualified_path {
                         let mut errno_opt: Option<Errno> = None;
-                        for env_path_str in env_paths {
+                        'env_paths: for env_path_str in env_paths {
                             let mut path = PathBuf::from_str(&env_path_str)
                                 .expect("Could not construct path buf from env_path");
 
                             path.push(command.path.clone());
 
                             match execve_(&path, args) {
-                                Ok(_) => break,
+                                // This Ok() break is actually useless
+                                // cause execve() only returns if there's
+                                // an error, otherwise it just stops the
+                                // child and returns the control to
+                                // parent. For more understanding
+                                // read: RETURN VALUES section
+                                // of execve man page
+                                Ok(_) => break 'env_paths,
                                 Err(errno_) => {
                                     errno_opt = Some(errno_);
                                 }
                             }
                         }
-                        if let Some(_errno) = errno_opt {
-                            write_to_shell(&format!("dss: command not found: {}\n", cmd_str))?;
+
+                        if let Some(errno) = errno_opt {
+                            write_error_to_shell(errno, cmd_str)?;
                             // FIXME: Pass proper errno here
-                            std::process::exit(1);
+                            exit_status = 1;
                         }
                     } else {
                         let result = execve_(&command.path, args);
-                        if let Err(_errno) = result {
-                            write_to_shell(&format!("dss: command not found: {}\n", cmd_str))?;
+                        if let Err(errno) = result {
+                            write_error_to_shell(errno, cmd_str)?;
                             // FIXME: Pass proper errno here
-                            std::process::exit(1);
+                            exit_status = 1;
                         }
                     }
 
-                    unsafe { libc::_exit(0) };
+                    unsafe { libc::_exit(exit_status) };
                 }
                 Err(err) => panic!("Fork failed: {err:?}"),
             }
@@ -227,7 +255,7 @@ fn is_builtin_command(cmd: &str) -> bool {
     BUILTIN_COMMANDS.contains(&cmd)
 }
 
-fn handle_builtin_command(cmd_str: &str, path_to_go_str: &str) -> io::Result<()> {
+fn handle_builtin_command(cmd_str: &str, path_to_go_str: &str) -> anyhow::Result<()> {
     if cmd_str == "cd" {
         let cmd_path = Path::new(path_to_go_str);
         chdir(cmd_path)?;
@@ -247,7 +275,11 @@ fn parse_paths() -> Vec<String> {
         .collect();
 }
 
-fn write_to_shell(output: &str) -> io::Result<()> {
+// Here we try to not use println as it can
+// panic, more here:
+// https://github.com/BurntSushi/advent-of-code/issues/17
+
+fn write_to_shell(output: &str) -> anyhow::Result<()> {
     io::stdout().write_all(output.as_bytes())?;
 
     // Flushing is important because:
@@ -257,13 +289,21 @@ fn write_to_shell(output: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn write_to_shell_colored(output: &str, color: Color) -> io::Result<()> {
+fn write_to_shell_colored(output: &str, color: Color) -> anyhow::Result<()> {
+    //FIXME: Figure out why colored doesn't work with write_all
+    // and replace println here
     match color {
         Color::Red => print!("{}", output.red()),
         Color::Green => print!("{}", output.green()),
     }
 
     io::stdout().flush().expect("flush failed!");
+
+    Ok(())
+}
+
+fn write_error_to_shell(errno: Errno, cmd_str: String) -> anyhow::Result<()> {
+    write_to_shell(&format!("dss: {}: {}\n", errno.desc(), cmd_str))?;
 
     Ok(())
 }
