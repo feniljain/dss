@@ -51,12 +51,16 @@ enum Color {
 // [X] implement `cd` builtin in your own shell
 // [X] print error messages according to errno
 //      [X] for invalid path command ( e.g. ./a.sh ) give no such file or directory error
+// [] add support for multiline commands
 // [] after stage 1 refactor code to have a separate engine and cmd parsing module
 //
 // Bonus
 // [X] add color depending on exit status
 // [] add last segment of current folder like my own zsh with some color
-// [] add support for multiline commands
+
+// Bugs
+// [] builtin command execution successful handling
+// [] qualified paths command execution successful handling
 
 fn main() -> anyhow::Result<()> {
     write_to_shell("Welcome to Dead Simple Shell!\n")?;
@@ -99,6 +103,7 @@ fn main() -> anyhow::Result<()> {
             args_with_cmd.remove(0);
 
             if args_with_cmd.len() == 0 {
+                // true will resolve to /usr/bin/true
                 args_with_cmd.push("true")
             }
 
@@ -118,10 +123,10 @@ fn main() -> anyhow::Result<()> {
                 .enumerate()
                 .filter_map(|(idx, x)| {
                     if idx == 0 {
-                        if cmd_path.starts_with("/")
+                        if !(cmd_path.starts_with("/")
                             || cmd_path.starts_with("./")
                             || cmd_path.starts_with("../")
-                            || cmd_path.components().count() > 1
+                            || cmd_path.components().count() > 1)
                         {
                             // cmd_path.components().last().and_then(|last_component| {
                             //     Some(
@@ -130,17 +135,12 @@ fn main() -> anyhow::Result<()> {
                             //     )
                             // })
                             //
-                            Some(
-                                CString::new(args_with_cmd[0])
-                                    .expect("Could not construct CString path"),
-                            )
-                        } else {
                             is_unqualified_path = true;
-                            Some(
-                                CString::new(args_with_cmd[0])
-                                    .expect("Could not construct CString path"),
-                            )
                         }
+                        Some(
+                            CString::new(args_with_cmd[0])
+                                .expect("Could not construct CString path"),
+                        )
                     } else {
                         Some(
                             CString::new(x.bytes().collect::<Vec<u8>>())
@@ -164,9 +164,9 @@ fn main() -> anyhow::Result<()> {
             handle_builtin_command(&args_with_cmd[0], path_to_go_str)?;
         } else {
             match unsafe { fork() } {
-                Ok(ForkResult::Parent { child, .. }) => {
-                    let wait_status = waitpid(child, None)
-                        .expect(&format!("Expected to wait for child with pid: {:?}", child));
+                Ok(ForkResult::Parent { child: child_pid, .. }) => {
+                    let wait_status = waitpid(child_pid, None)
+                        .expect(&format!("Expected to wait for child with pid: {:?}", child_pid));
                     match wait_status {
                         WaitStatus::Exited(_pid, mut exit_code) => {
                             // FIXME: Ugly if/else, replace
@@ -193,9 +193,9 @@ fn main() -> anyhow::Result<()> {
                         &command.args
                     };
 
-                    // If command starts with "/" or "./" or "../", do not do PATH appending
                     let mut exit_status = 0;
                     let mut errno_opt: Option<Errno> = None;
+                    // If command starts with "/" or "./" or "../", do not do PATH appending
                     if is_unqualified_path {
                         'env_paths: for env_path_str in env_paths {
                             let mut path = PathBuf::from_str(&env_path_str)
