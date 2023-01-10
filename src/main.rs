@@ -1,5 +1,7 @@
+use colored::Colorize;
 use libc::getenv;
 use nix::{
+    errno::Errno,
     sys::wait::{waitpid, WaitStatus},
     unistd::{chdir, execve, fork, ForkResult},
 };
@@ -25,6 +27,12 @@ struct Command {
     args: Vec<CString>,
 }
 
+#[derive(Debug)]
+enum Color {
+    Green,
+    Red,
+}
+
 // FIXME: Handle error properly everywhere
 
 // Tasks
@@ -32,14 +40,13 @@ struct Command {
 // [X] handle empty commands
 // [X] add / ./ handling
 // [X] correct path parsing and argument parsing according to the `man execve`
-// [] use current directory path in env paths
 // [] add Ctrl-C + Ctrl-D handling
 // [X] pass stage 1 tests
 // [X] parsing all paths
 // [X] trying all paths robustly
 // [X] proper handling for command not found
 // [] include handling of `!` while parsing and also while checking exit status
-// [] use exit status of wait: The Unix convention is that a zero exit status represents success, and any non-zero exit status represents failure.
+// [X] use exit status of wait: The Unix convention is that a zero exit status represents success, and any non-zero exit status represents failure.
 // [X] implement your own `cd` in C
 // [X] implement `cd` builtin in your own shell
 // [] add support for multiline commands
@@ -47,8 +54,10 @@ struct Command {
 // [] for invalid path command ( e.g. ./a.sh ) give no such file or directory error
 //
 // Bonus
-// [] add red color to output if last command exited with a non-zero status
-fn main() -> io::Result<()> {
+// [X] add color depending on exit status
+// [] add last segment of current folder like my own zsh with some color
+
+fn main() -> anyhow::Result<()> {
     write_to_shell("Welcome to Dead Simple Shell!\n")?;
 
     let env_paths = parse_paths();
@@ -56,8 +65,14 @@ fn main() -> io::Result<()> {
     let term = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(consts::SIGINT, Arc::clone(&term))?;
 
+    let mut execution_successful = true;
+
     while !term.load(Ordering::Relaxed) {
-        write_to_shell("$ ")?;
+        if !execution_successful {
+            write_to_shell_colored("$ ", Color::Red)?;
+        } else {
+            write_to_shell_colored("$ ", Color::Green)?;
+        }
 
         let mut cmd_str = String::new();
 
@@ -139,9 +154,7 @@ fn main() -> io::Result<()> {
                         .expect(&format!("Expected to wait for child with pid: {:?}", child));
                     match wait_status {
                         WaitStatus::Exited(_pid, exit_code) => {
-                            if exit_code != 0 {
-                                println!("Execution failed!");
-                            }
+                            execution_successful = exit_code == 0;
                         }
                         _ => write_to_shell(&format!("Did not get exited: {:?}", wait_status))?,
                     }
@@ -158,7 +171,7 @@ fn main() -> io::Result<()> {
 
                     // If command starts with "/" or "./" or "../", do not do PATH appending
                     if is_unqualified_path {
-                        let mut err = None;
+                        let mut errno_opt: Option<Errno> = None;
                         for env_path_str in env_paths {
                             let mut path = PathBuf::from_str(&env_path_str)
                                 .expect("Could not construct path buf from env_path");
@@ -167,17 +180,22 @@ fn main() -> io::Result<()> {
 
                             match execve_(&path, args) {
                                 Ok(_) => break,
-                                Err(err_) => {
-                                    err = Some(err_);
+                                Err(errno_) => {
+                                    errno_opt = Some(errno_);
                                 }
                             }
                         }
-                        if err.is_some() {
+                        if let Some(_errno) = errno_opt {
                             write_to_shell(&format!("dss: command not found: {}\n", cmd_str))?;
+                            // FIXME: Pass proper errno here
+                            std::process::exit(1);
                         }
                     } else {
-                        if execve_(&command.path, args).is_err() {
-                            write_to_shell(&format!("dss: command not found: {}\n", cmd_str))?
+                        let result = execve_(&command.path, args);
+                        if let Err(_errno) = result {
+                            write_to_shell(&format!("dss: command not found: {}\n", cmd_str))?;
+                            // FIXME: Pass proper errno here
+                            std::process::exit(1);
                         }
                     }
 
@@ -231,8 +249,20 @@ fn parse_paths() -> Vec<String> {
 
 fn write_to_shell(output: &str) -> io::Result<()> {
     io::stdout().write_all(output.as_bytes())?;
+
     // Flushing is important because:
     // https://stackoverflow.com/questions/34993744/why-does-this-read-input-before-printing
+    io::stdout().flush().expect("flush failed!");
+
+    Ok(())
+}
+
+fn write_to_shell_colored(output: &str, color: Color) -> io::Result<()> {
+    match color {
+        Color::Red => print!("{}", output.red()),
+        Color::Green => print!("{}", output.green()),
+    }
+
     io::stdout().flush().expect("flush failed!");
 
     Ok(())
