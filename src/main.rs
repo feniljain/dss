@@ -5,6 +5,7 @@ use nix::{
 };
 use signal_hook::consts;
 use std::{
+    convert::Infallible,
     ffi::{CStr, CString},
     io::{self, Write},
     os::unix::prelude::OsStrExt,
@@ -36,16 +37,18 @@ struct Command {
 // [X] pass stage 1 tests
 // [X] parsing all paths
 // [X] trying all paths robustly
-// [] proper handling for command not found
+// [X] proper handling for command not found
 // [] use exit status of wait: The Unix convention is that a zero exit status represents success, and any non-zero exit status represents failure.
 // [X] implement your own `cd` in C
 // [X] implement `cd` builtin in your own shell
 // [] add support for multiline commands
+// [] after stage 1 refactor code to have a separate engine and cmd parsing module
+// [] for invalid path command ( e.g. ./a.sh ) give no such file or directory error
 //
 // Bonus
 // [] add red color to output if last command exited with a non-zero status
 fn main() -> io::Result<()> {
-    io::stdout().write_all(b"Welcome to Dead Simple Shell!\n")?;
+    write_to_shell("Welcome to Dead Simple Shell!\n")?;
 
     let env_paths = parse_paths();
 
@@ -53,10 +56,7 @@ fn main() -> io::Result<()> {
     signal_hook::flag::register(consts::SIGINT, Arc::clone(&term))?;
 
     while !term.load(Ordering::Relaxed) {
-        io::stdout().write_all(b"$ ")?;
-        // Flushing is important because:
-        // https://stackoverflow.com/questions/34993744/why-does-this-read-input-before-printing
-        io::stdout().flush().expect("flush failed!");
+        write_to_shell("$ ")?;
 
         let mut cmd_str = String::new();
 
@@ -98,6 +98,7 @@ fn main() -> io::Result<()> {
                             //             .expect("Could not construct CString path"),
                             //     )
                             // })
+                            //
                             Some(
                                 CString::new(args_with_cmd[0])
                                     .expect("Could not construct CString path"),
@@ -148,17 +149,27 @@ fn main() -> io::Result<()> {
 
                     // If command starts with "/" or "./" or "../", do not do PATH appending
                     if is_unqualified_path {
+                        let mut err = None;
                         for env_path_str in env_paths {
                             let mut path = PathBuf::from_str(&env_path_str)
                                 .expect("Could not construct path buf from env_path");
 
                             path.push(command.path.clone());
-                            println!("Trying path: {:?}", path);
 
-                            execve_(&path, args)
+                            match execve_(&path, args) {
+                                Ok(_) => break,
+                                Err(err_) => {
+                                    err = Some(err_);
+                                }
+                            }
+                        }
+                        if err.is_some() {
+                            write_to_shell(&format!("dss: command not found: {}\n", cmd_str))?;
                         }
                     } else {
-                        execve_(&command.path, args);
+                        if execve_(&command.path, args).is_err() {
+                            write_to_shell(&format!("dss: command not found: {}\n", cmd_str))?
+                        }
                     }
 
                     unsafe { libc::_exit(0) };
@@ -171,7 +182,7 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn execve_(path: &PathBuf, args: &[CString]) {
+fn execve_(path: &PathBuf, args: &[CString]) -> nix::Result<Infallible> {
     let path = CString::new(path.as_os_str().as_bytes()).expect("Could not construct CString path");
 
     // println!("path: {:?}", path);
@@ -182,7 +193,7 @@ fn execve_(path: &PathBuf, args: &[CString]) {
     //     Err(_err) => println!("{:?}", _err),
     // }
 
-    let _ = execve::<CString, CString>(&path, args, &[]);
+    execve::<CString, CString>(&path, args, &[])
 }
 
 fn is_builtin_command(cmd: &str) -> bool {
@@ -207,4 +218,13 @@ fn parse_paths() -> Vec<String> {
         .split(":")
         .map(|x| String::from(x))
         .collect();
+}
+
+fn write_to_shell(output: &str) -> io::Result<()> {
+    io::stdout().write_all(output.as_bytes())?;
+    // Flushing is important because:
+    // https://stackoverflow.com/questions/34993744/why-does-this-read-input-before-printing
+    io::stdout().flush().expect("flush failed!");
+
+    Ok(())
 }

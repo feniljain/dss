@@ -9,6 +9,8 @@ char **get_input(char *);
 void cwd();
 
 int main() {
+  printf("Welcome to shell\n");
+
   char **command;
   char *input;
   pid_t child_pid;
