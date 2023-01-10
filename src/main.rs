@@ -59,8 +59,8 @@ enum Color {
 // [] add last segment of current folder like my own zsh with some color
 
 // Bugs
-// [] builtin command execution successful handling
-// [] qualified paths command execution successful handling
+// [X] builtin command execution successful handling
+// [] builtin command execution error case handling
 
 fn main() -> anyhow::Result<()> {
     write_to_shell("Welcome to Dead Simple Shell!\n")?;
@@ -161,7 +161,12 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
-            handle_builtin_command(&args_with_cmd[0], path_to_go_str)?;
+            let result = handle_builtin_command(&args_with_cmd[0], path_to_go_str);
+            if result.is_err() {
+                execution_successful = false;
+            } else {
+                execution_successful = true;
+            }
         } else {
             match unsafe { fork() } {
                 Ok(ForkResult::Parent { child: child_pid, .. }) => {
