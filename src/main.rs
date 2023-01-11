@@ -22,9 +22,13 @@ use std::{
 const BUILTIN_COMMANDS: [&str; 1] = ["cd"];
 
 #[derive(Default, Clone, Debug)]
-struct Command {
+struct Command<'a> {
+    args_with_cmd: Vec<&'a str>,
     path: PathBuf,
     args: Vec<CString>,
+    negate_exit_status: bool,
+    // Unqualified path = A path not starting with "/" or "../" or "./"
+    is_unqualified_path: bool,
 }
 
 #[derive(Debug)]
@@ -51,6 +55,8 @@ enum Color {
 // [X] implement `cd` builtin in your own shell
 // [X] print error messages according to errno
 //      [X] for invalid path command ( e.g. ./a.sh ) give no such file or directory error
+// [] add support for `;`, `||` and `&&` in commands
+// [] after stage 1 refactor code to have a separate engine and cmd parsing module
 // [] add support for multiline commands
 // [] after stage 1 refactor code to have a separate engine and cmd parsing module
 //
@@ -72,7 +78,6 @@ fn main() -> anyhow::Result<()> {
     signal_hook::flag::register(consts::SIGINT, Arc::clone(&term))?;
 
     let mut execution_successful = true;
-    let mut negate_exit_status;
 
     while !term.load(Ordering::Relaxed) {
         if !execution_successful {
@@ -80,8 +85,6 @@ fn main() -> anyhow::Result<()> {
         } else {
             write_to_shell_colored("$ ", Color::Green)?;
         }
-
-        negate_exit_status = false;
 
         let mut cmd_str = String::new();
 
@@ -97,71 +100,19 @@ fn main() -> anyhow::Result<()> {
             break;
         }
 
-        let mut args_with_cmd: Vec<&str> = cmd_str.split_ascii_whitespace().collect();
+        let command = parse_command(&cmd_str, false);
 
-        if args_with_cmd[0] == "!" {
-            args_with_cmd.remove(0);
-
-            if args_with_cmd.len() == 0 {
-                // true will resolve to /usr/bin/true
-                args_with_cmd.push("true")
-            }
-
-            negate_exit_status = true;
-        }
-
-        let cmd_path = PathBuf::from_str(&args_with_cmd[0])
-            .expect("Could not construct path buf from command");
-
-        // Unqualified path = A path not starting with "/" or "../" or "./"
-        let mut is_unqualified_path = false;
-
-        let command = Command {
-            path: cmd_path.clone(),
-            args: args_with_cmd
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, x)| {
-                    if idx == 0 {
-                        if !(cmd_path.starts_with("/")
-                            || cmd_path.starts_with("./")
-                            || cmd_path.starts_with("../")
-                            || cmd_path.components().count() > 1)
-                        {
-                            // cmd_path.components().last().and_then(|last_component| {
-                            //     Some(
-                            //         CString::new(last_component.as_os_str().as_bytes())
-                            //             .expect("Could not construct CString path"),
-                            //     )
-                            // })
-                            //
-                            is_unqualified_path = true;
-                        }
-                        Some(
-                            CString::new(args_with_cmd[0])
-                                .expect("Could not construct CString path"),
-                        )
-                    } else {
-                        Some(
-                            CString::new(x.bytes().collect::<Vec<u8>>())
-                                .expect(&format!("Could not construct CString arg: {:?}", x)),
-                        )
-                    }
-                })
-                .collect(),
-        };
-
-        if is_builtin_command(args_with_cmd[0]) {
+        if is_builtin_command(command.args_with_cmd[0]) {
             let mut path_to_go_str = "/";
-            if args_with_cmd.len() > 1 {
+            if command.args.len() > 1 {
                 // If we receive `~` after cd, we want to go to
                 // absolute root, which is what "/" denotes already
-                if path_to_go_str != "~" {
-                    path_to_go_str = args_with_cmd[1];
+                if command.args_with_cmd[1] != "~" {
+                    path_to_go_str = command.args_with_cmd[1];
                 }
             }
 
-            let result = handle_builtin_command(&args_with_cmd[0], path_to_go_str);
+            let result = handle_builtin_command(&command.args_with_cmd[0], path_to_go_str);
             if result.is_err() {
                 execution_successful = false;
             } else {
@@ -169,14 +120,18 @@ fn main() -> anyhow::Result<()> {
             }
         } else {
             match unsafe { fork() } {
-                Ok(ForkResult::Parent { child: child_pid, .. }) => {
-                    let wait_status = waitpid(child_pid, None)
-                        .expect(&format!("Expected to wait for child with pid: {:?}", child_pid));
+                Ok(ForkResult::Parent {
+                    child: child_pid, ..
+                }) => {
+                    let wait_status = waitpid(child_pid, None).expect(&format!(
+                        "Expected to wait for child with pid: {:?}",
+                        child_pid
+                    ));
                     match wait_status {
                         WaitStatus::Exited(_pid, mut exit_code) => {
                             // FIXME: Ugly if/else, replace
                             // with binary operations
-                            if negate_exit_status {
+                            if command.negate_exit_status {
                                 if exit_code == 0 {
                                     exit_code = 1;
                                 } else {
@@ -201,7 +156,7 @@ fn main() -> anyhow::Result<()> {
                     let mut exit_status = 0;
                     let mut errno_opt: Option<Errno> = None;
                     // If command starts with "/" or "./" or "../", do not do PATH appending
-                    if is_unqualified_path {
+                    if command.is_unqualified_path {
                         'env_paths: for env_path_str in env_paths {
                             let mut path = PathBuf::from_str(&env_path_str)
                                 .expect("Could not construct path buf from env_path");
@@ -230,7 +185,7 @@ fn main() -> anyhow::Result<()> {
                     }
 
                     if let Some(errno) = errno_opt {
-                        write_error_to_shell(errno, cmd_str, is_unqualified_path)?;
+                        write_error_to_shell(errno, &cmd_str, command.is_unqualified_path)?;
                         // FIXME: Pass proper errno here
                         exit_status = 1;
                     }
@@ -243,6 +198,65 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn parse_command(cmd_str: &str, mut negate_exit_status: bool) -> Command {
+    let mut args_with_cmd: Vec<&str> = cmd_str.split_ascii_whitespace().collect();
+
+    if args_with_cmd[0] == "!" {
+        args_with_cmd.remove(0);
+
+        if args_with_cmd.len() == 0 {
+            // true will resolve to /usr/bin/true
+            args_with_cmd.push("true")
+        }
+
+        negate_exit_status = true;
+    }
+
+    let cmd_path =
+        PathBuf::from_str(&args_with_cmd[0]).expect("Could not construct path buf from command");
+
+    let mut is_unqualified_path = false;
+
+    let mut command = Command {
+        path: cmd_path.clone(),
+        args: args_with_cmd
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, x)| {
+                if idx == 0 {
+                    if !(cmd_path.starts_with("/")
+                        || cmd_path.starts_with("./")
+                        || cmd_path.starts_with("../")
+                        || cmd_path.components().count() > 1)
+                    {
+                        // cmd_path.components().last().and_then(|last_component| {
+                        //     Some(
+                        //         CString::new(last_component.as_os_str().as_bytes())
+                        //             .expect("Could not construct CString path"),
+                        //     )
+                        // })
+                        //
+                        is_unqualified_path = true;
+                    }
+                    Some(CString::new(args_with_cmd[0]).expect("Could not construct CString path"))
+                } else {
+                    Some(
+                        CString::new(x.bytes().collect::<Vec<u8>>())
+                            .expect(&format!("Could not construct CString arg: {:?}", x)),
+                    )
+                }
+            })
+            .collect(),
+        negate_exit_status,
+        is_unqualified_path: false,
+        args_with_cmd,
+    };
+
+    command.is_unqualified_path = is_unqualified_path;
+
+    return command;
 }
 
 fn execve_(path: &PathBuf, args: &[CString]) -> nix::Result<Infallible> {
@@ -312,7 +326,7 @@ fn write_to_shell_colored(output: &str, color: Color) -> anyhow::Result<()> {
 
 fn write_error_to_shell(
     errno: Errno,
-    cmd_str: String,
+    cmd_str: &str,
     is_unqualified_path: bool,
 ) -> anyhow::Result<()> {
     if is_unqualified_path {
