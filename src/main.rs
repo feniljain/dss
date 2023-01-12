@@ -10,6 +10,7 @@ use std::{
     convert::Infallible,
     ffi::{CStr, CString},
     io::{self, Write},
+    ops::ControlFlow,
     os::unix::prelude::OsStrExt,
     path::{Path, PathBuf},
     str::FromStr,
@@ -22,8 +23,8 @@ use std::{
 const BUILTIN_COMMANDS: [&str; 1] = ["cd"];
 
 #[derive(Default, Clone, Debug)]
-struct Command<'a> {
-    args_with_cmd: Vec<&'a str>,
+struct Command {
+    args_with_cmd: Vec<String>,
     path: PathBuf,
     args: Vec<CString>,
     negate_exit_status: bool,
@@ -31,10 +32,43 @@ struct Command<'a> {
     is_unqualified_path: bool,
 }
 
+#[derive(Clone, Debug)]
+enum Separator {
+    Semicolon,
+    LogicalOr,
+    LogicalAnd,
+}
+
+impl Separator {
+    // fn as_str(&self) -> &str {
+    //     match self {
+    //         Separator::Semicolon => ";",
+    //         Separator::LogicalOr => "||",
+    //         Separator::LogicalAnd => "&&",
+    //     }
+    // }
+
+    fn is_separator<T: ToString>(input: T) -> bool {
+        let input_str = input.to_string();
+        input_str == ";" || input_str == "||" || input_str == "&&"
+    }
+
+    fn to_separator<T: ToString>(input: T) -> Option<Separator> {
+        let input_str = input.to_string();
+
+        match input_str.as_str() {
+            ";" => Some(Separator::Semicolon),
+            "||" => Some(Separator::LogicalOr),
+            "&&" => Some(Separator::LogicalAnd),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Default, Clone, Debug)]
 struct Engine {
     execution_successful: bool,
-    env_paths:  Vec<String>,
+    env_paths: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -44,6 +78,7 @@ enum Color {
 }
 
 // FIXME: Handle error properly everywhere
+// FIXME: Remove all unnecessary clones
 
 // Tasks
 // [X] correct command split by space
@@ -64,15 +99,18 @@ enum Color {
 // [] add support for `;`, `||` and `&&` in commands
 // [] after stage 1 refactor code to have a separate engine and cmd parsing module
 // [] add support for multiline commands
-// [] after stage 1 refactor code to have a separate engine and cmd parsing module
+// [] after stage 1 refactor code to have a separate engine and cmd parsing
+//    module, as well as break the functions in it down too
 //
 // Bonus
 // [X] add color depending on exit status
 // [] add last segment of current folder like my own zsh with some color
+// [] Implement readline like https://github.com/kkawakam/rustyline
 
 // Bugs
 // [X] builtin command execution successful handling
 // [] builtin command execution error case handling
+// [] correct signal handling by referencing https://github.com/kkawakam/rustyline
 
 fn main() -> anyhow::Result<()> {
     write_to_shell("Welcome to Dead Simple Shell!\n")?;
@@ -95,7 +133,7 @@ fn main() -> anyhow::Result<()> {
 
         io::stdin().read_line(&mut input_str)?;
 
-        input_str = input_str.trim().to_string();
+        input_str = input_str.to_string();
 
         if input_str == "" {
             continue;
@@ -105,36 +143,127 @@ fn main() -> anyhow::Result<()> {
             break;
         }
 
-        // FIXME: This is hacky, implement proper tokenizer
-        // if input_str.contains(";") {
-        //     let commands = input_str.split(";").for_each(|| {
-        //     });
-        // }
-        let command = Command::parse_command(&input_str, false);
+        let (commands, separators) = Command::parse_input(input_str);
+        if separators.len() == 0 {
+            assert!(commands.len() == 1);
+            if commands[0].args_with_cmd[0] == "exit" {
+                break;
+            }
+            engine.execute_command(commands[0].clone())?;
+        } else {
+            let mut execution_result: Option<(bool, &Separator)> = None;
+            let n_cmds = commands.len();
+            let mut break_term_loop = false;
+            commands.iter().enumerate().for_each(|(i, command)| {
+                if command.args_with_cmd[0] == "exit" {
+                    break_term_loop = true;
+                    ControlFlow::Break::<bool>(true);
+                    return;
+                }
 
-        engine.execute_command(command)?;
+                // FIXME: Do not ignore result of execution here
+                match execution_result {
+                    Some((last_execution_result, separator)) => {
+                        match separator {
+                            Separator::Semicolon => {
+                                let _ = engine.execute_command(command.clone());
+                            }
+                            Separator::LogicalOr => {
+                                if !last_execution_result {
+                                    let _ = engine.execute_command(command.clone());
+                                }
+                            }
+                            Separator::LogicalAnd => {
+                                if last_execution_result {
+                                    let _ = engine.execute_command(command.clone());
+                                }
+                            }
+                        }
+
+                        if i < n_cmds - 1 {
+                            execution_result = Some((engine.execution_successful, &separators[i]));
+                        }
+                    }
+                    None => {
+                        let _ = engine.execute_command(command.clone());
+                        execution_result = Some((engine.execution_successful, &separators[i]));
+                    }
+                }
+            });
+
+            if break_term_loop {
+                break;
+            }
+        }
     }
 
     Ok(())
 }
 
-impl<'a> Command<'a> {
-    fn parse_command(cmd_str: &str, mut negate_exit_status: bool) -> Command {
-        let mut args_with_cmd: Vec<&str> = cmd_str.split_ascii_whitespace().collect();
+impl Command {
+    fn parse_input(input_str: String) -> (Vec<Command>, Vec<Separator>) {
+        // FIXME: This is an ad-hoc implementation,
+        // implement proper tokenizer acc. to spec
+        let mut commands = vec![];
+        let mut separators = vec![];
+
+        let mut word = String::new();
+        let mut command_strs = vec![];
+        input_str.chars().for_each(|ch| {
+            // FIXME: Implement multiline commands here
+            // For single line commands this will be the end
+            if ch == '\n' {
+                command_strs.push(word.clone());
+                let command = Command::parse_cmd_str_vec(command_strs.clone());
+                commands.push(command);
+                command_strs = vec![];
+                ControlFlow::Break::<char>(ch);
+            }
+
+            // FIXME: Here we make an assumption that
+            // separators will always be space paadded,
+            // correct this assumption
+            if ch == ' ' {
+                if Separator::is_separator(&word) {
+                    if let Some(separator) = Separator::to_separator(&word) {
+                        separators.push(separator);
+                        let command = Command::parse_cmd_str_vec(command_strs.clone());
+                        commands.push(command);
+                        command_strs = vec![];
+                    }
+                } else {
+                    command_strs.push(word.clone());
+                }
+                word = String::new();
+            } else {
+                word.push(ch);
+            }
+        });
+
+        (commands, separators)
+    }
+
+    // fn parse_command(cmd_str: &str) -> Command {
+    //     let mut args_with_cmd: Vec<&str> = cmd_str.split_ascii_whitespace().collect();
+    //     Self::parse_cmd_str_vec(args_with_cmd)
+    // }
+
+    fn parse_cmd_str_vec(mut args_with_cmd: Vec<String>) -> Command {
+        let mut negate_exit_status = false;
 
         if args_with_cmd[0] == "!" {
             args_with_cmd.remove(0);
 
             if args_with_cmd.len() == 0 {
                 // true will resolve to /usr/bin/true
-                args_with_cmd.push("true")
+                args_with_cmd.push("true".to_string())
             }
 
             negate_exit_status = true;
         }
 
-        let cmd_path =
-        PathBuf::from_str(&args_with_cmd[0]).expect("Could not construct path buf from command");
+        let cmd_path = PathBuf::from_str(&args_with_cmd[0])
+            .expect("Could not construct path buf from command");
 
         let mut is_unqualified_path = false;
 
@@ -146,9 +275,9 @@ impl<'a> Command<'a> {
                 .filter_map(|(idx, x)| {
                     if idx == 0 {
                         if !(cmd_path.starts_with("/")
-                        || cmd_path.starts_with("./")
-                        || cmd_path.starts_with("../")
-                        || cmd_path.components().count() > 1)
+                            || cmd_path.starts_with("./")
+                            || cmd_path.starts_with("../")
+                            || cmd_path.components().count() > 1)
                         {
                             // cmd_path.components().last().and_then(|last_component| {
                             //     Some(
@@ -159,7 +288,10 @@ impl<'a> Command<'a> {
                             //
                             is_unqualified_path = true;
                         }
-                        Some(CString::new(args_with_cmd[0]).expect("Could not construct CString path"))
+                        Some(
+                            CString::new(args_with_cmd[0].clone())
+                                .expect("Could not construct CString path"),
+                        )
                     } else {
                         Some(
                             CString::new(x.bytes().collect::<Vec<u8>>())
@@ -188,13 +320,13 @@ impl Engine {
     }
 
     fn execute_command(&mut self, command: Command) -> anyhow::Result<()> {
-        if is_builtin_command(command.args_with_cmd[0]) {
+        if is_builtin_command(&command.args_with_cmd[0]) {
             let mut path_to_go_str = "/";
             if command.args.len() > 1 {
                 // If we receive `~` after cd, we want to go to
                 // absolute root, which is what "/" denotes already
                 if command.args_with_cmd[1] != "~" {
-                    path_to_go_str = command.args_with_cmd[1];
+                    path_to_go_str = &command.args_with_cmd[1];
                 }
             }
 
@@ -209,26 +341,26 @@ impl Engine {
                 Ok(ForkResult::Parent {
                     child: child_pid, ..
                 }) => {
-                        let wait_status = waitpid(child_pid, None).expect(&format!(
-                            "Expected to wait for child with pid: {:?}",
-                            child_pid
-                        ));
-                        match wait_status {
-                            WaitStatus::Exited(_pid, mut exit_code) => {
-                                // FIXME: Ugly if/else, replace
-                                // with binary operations
-                                if command.negate_exit_status {
-                                    if exit_code == 0 {
-                                        exit_code = 1;
-                                    } else {
-                                        exit_code = 0;
-                                    }
+                    let wait_status = waitpid(child_pid, None).expect(&format!(
+                        "Expected to wait for child with pid: {:?}",
+                        child_pid
+                    ));
+                    match wait_status {
+                        WaitStatus::Exited(_pid, mut exit_code) => {
+                            // FIXME: Ugly if/else, replace
+                            // with binary operations
+                            if command.negate_exit_status {
+                                if exit_code == 0 {
+                                    exit_code = 1;
+                                } else {
+                                    exit_code = 0;
                                 }
-                                self.execution_successful = exit_code == 0;
                             }
-                            _ => write_to_shell(&format!("Did not get exited: {:?}", wait_status))?,
+                            self.execution_successful = exit_code == 0;
                         }
+                        _ => write_to_shell(&format!("Did not get exited: {:?}", wait_status))?,
                     }
+                }
                 Ok(ForkResult::Child) => {
                     // FIXME: Optimize this .len() out,
                     // we just wanna know if there are more
@@ -271,7 +403,11 @@ impl Engine {
                     }
 
                     if let Some(errno) = errno_opt {
-                        write_error_to_shell(errno, &command.args_with_cmd[0], command.is_unqualified_path)?;
+                        write_error_to_shell(
+                            errno,
+                            &command.args_with_cmd[0],
+                            command.is_unqualified_path,
+                        )?;
                         // FIXME: Pass proper errno here
                         exit_status = 1;
                     }
@@ -363,4 +499,52 @@ fn write_error_to_shell(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Command;
+
+    #[test]
+    fn test_command_input_str_parsing() {
+        let (commands, separators) = Command::parse_input("ls\n".to_string());
+
+        assert!(commands.len() == 1);
+        assert!(separators.len() == 0);
+        assert!(commands[0].args_with_cmd[0] == "ls".to_string());
+
+        let (commands, separators) = Command::parse_input("ls -la\n".to_string());
+
+        assert!(commands.len() == 1);
+        assert!(separators.len() == 0);
+        assert!(commands[0].args_with_cmd[0] == "ls".to_string());
+        assert!(commands[0].args_with_cmd[1] == "-la".to_string());
+
+        let (commands, separators) = Command::parse_input("ls -la ; echo foo\n".to_string());
+
+        assert!(commands.len() == 2);
+        assert!(separators.len() == 1);
+        assert!(commands[0].args_with_cmd[0] == "ls".to_string());
+        assert!(commands[0].args_with_cmd[1] == "-la".to_string());
+        assert!(commands[1].args_with_cmd[0] == "echo".to_string());
+        assert!(commands[1].args_with_cmd[1] == "foo".to_string());
+
+        let (commands, separators) = Command::parse_input("ls -la || echo foo\n".to_string());
+
+        assert!(commands.len() == 2);
+        assert!(separators.len() == 1);
+        assert!(commands[0].args_with_cmd[0] == "ls".to_string());
+        assert!(commands[0].args_with_cmd[1] == "-la".to_string());
+        assert!(commands[1].args_with_cmd[0] == "echo".to_string());
+        assert!(commands[1].args_with_cmd[1] == "foo".to_string());
+
+        let (commands, separators) = Command::parse_input("ls -la && echo foo\n".to_string());
+
+        assert!(commands.len() == 2);
+        assert!(separators.len() == 1);
+        assert!(commands[0].args_with_cmd[0] == "ls".to_string());
+        assert!(commands[0].args_with_cmd[1] == "-la".to_string());
+        assert!(commands[1].args_with_cmd[0] == "echo".to_string());
+        assert!(commands[1].args_with_cmd[1] == "foo".to_string());
+    }
 }
