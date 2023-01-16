@@ -5,6 +5,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+// ref: https://indradhanush.github.io/blog/writing-a-unix-shell-part-3/
+
 char **get_input(char *);
 void cwd();
 
