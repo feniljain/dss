@@ -1,13 +1,29 @@
-use std::{ffi::{CString, CStr}, path::{PathBuf, Path}, convert::Infallible, str::FromStr, os::unix::prelude::OsStrExt};
+use libc::getenv;
 use nix::{
     errno::Errno,
     sys::wait::{waitpid, WaitStatus},
     unistd::{chdir, execve, fork, ForkResult},
 };
-use libc::getenv;
+use signal_hook::consts;
+use std::{
+    convert::Infallible,
+    ffi::{CStr, CString},
+    io,
+    ops::ControlFlow,
+    os::unix::prelude::OsStrExt,
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
-use crate::{command::Command, writer::{write_to_shell, write_error_to_shell}};
-use crate::errors::ShellError;
+use crate::{
+    command::Command,
+    writer::{write_error_to_shell, write_to_shell, write_to_shell_colored, Color},
+};
+use crate::{command::Separator, errors::ShellError};
 
 const BUILTIN_COMMANDS: [&str; 2] = ["cd", "exec"];
 
@@ -25,17 +41,113 @@ impl Engine {
         }
     }
 
-    pub fn execute(&mut self, command: Command) -> anyhow::Result<()> {
-        // if{
+    pub fn fire_on(&mut self) -> anyhow::Result<()> {
+        write_to_shell("Welcome to Dead Simple Shell!\n")?;
 
-        // }
-        if is_builtin_command(&command.args_with_cmd[0]) {
-            let result = self.handle_builtin_command(command);
-            if result.is_err() {
-                self.execution_successful = false;
+        let term = Arc::new(AtomicBool::new(false));
+        signal_hook::flag::register(consts::SIGINT, Arc::clone(&term))?;
+
+        while !term.load(Ordering::Relaxed) {
+            if !self.execution_successful {
+                write_to_shell_colored("$ ", Color::Red)?;
             } else {
-                self.execution_successful = true;
+                write_to_shell_colored("$ ", Color::Green)?;
             }
+
+            let mut input_str = String::new();
+
+            io::stdin().read_line(&mut input_str)?;
+
+            input_str = input_str.to_string();
+
+            if input_str.trim() == "" {
+                continue;
+            }
+
+            if input_str == "exit" {
+                break;
+            }
+
+            let (commands, separators) = Command::parse_input(input_str)?;
+            let break_term_loop = self.execute_commands_with_separators(commands, separators)?;
+            if break_term_loop {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn execute_commands_with_separators(
+        &mut self,
+        commands: Vec<Command>,
+        separators: Vec<Separator>,
+    ) -> anyhow::Result<bool> {
+        let mut break_term_loop = false;
+
+        if separators.len() == 0 {
+            assert!(commands.len() == 1);
+
+            if commands[0].args_with_cmd[0] == "exit" {
+                break_term_loop = true;
+                return Ok(break_term_loop);
+            }
+
+            self.execute_command_by_forking(commands[0].clone())?;
+        } else {
+            let mut execution_result: Option<(bool, &Separator)> = None;
+            let n_cmds = commands.len();
+            commands.iter().enumerate().for_each(|(i, command)| {
+                if command.args_with_cmd[0] == "exit" {
+                    break_term_loop = true;
+                    ControlFlow::Break::<bool>(true);
+                    return;
+                }
+
+                // FIXME: Do not ignore result of execution here
+                match execution_result {
+                    Some((last_execution_result, separator)) => {
+                        match separator {
+                            Separator::Semicolon => {
+                                let _ = self.execute_command(command.clone());
+                            }
+                            Separator::LogicalOr => {
+                                if !last_execution_result {
+                                    let _ = self.execute_command(command.clone());
+                                }
+                            }
+                            Separator::LogicalAnd => {
+                                if last_execution_result {
+                                    let _ = self.execute_command(command.clone());
+                                }
+                            }
+                        }
+
+                        if i < n_cmds - 1 {
+                            execution_result = Some((self.execution_successful, &separators[i]));
+                        }
+                    }
+                    None => {
+                        let _ = self.execute_command(command.clone());
+                        execution_result = Some((self.execution_successful, &separators[i]));
+                    }
+                }
+            });
+
+            // FIXME: add logic to break the term loop
+            // if break_term_loop {
+            //     // break;
+            //     return Ok(());
+            // }
+        }
+
+        Ok(break_term_loop)
+    }
+
+    fn execute_command(&mut self, command: Command) -> anyhow::Result<()> {
+        if is_builtin_command(&command.args_with_cmd[0]) {
+            // FIXME: Handle this error properly
+            self.execution_successful = !self.handle_builtin_command(command).is_err();
         } else {
             self.execute_command_by_forking(command)?;
         }

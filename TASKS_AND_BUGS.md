@@ -25,6 +25,7 @@
 - [X] add color depending on exit status
 - [ ] add last segment of current folder like my own zsh with some color
 - [ ] Implement readline like https://github.com/kkawakam/rustyline
+- [ ] Handle Ctrl+P input, maintain last command executed, and fill input with it
 
 # Bugs
 
