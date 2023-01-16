@@ -20,10 +20,10 @@ use std::{
 };
 
 use crate::{
-    command::Command,
+    command::{Command, Separator},
+    errors::ShellError,
     writer::{write_error_to_shell, write_to_shell, write_to_shell_colored, Color},
 };
-use crate::{command::Separator, errors::ShellError};
 
 const BUILTIN_COMMANDS: [&str; 2] = ["cd", "exec"];
 
@@ -295,11 +295,102 @@ fn is_builtin_command(cmd: &str) -> bool {
 
 fn parse_paths() -> Vec<String> {
     let path_cstring = CString::new("PATH").expect("could not construct PATH C String");
+
     let envs_cstr: CString = unsafe { CStr::from_ptr(getenv(path_cstring.as_ptr())) }.into();
+
     return envs_cstr
         .to_str()
         .expect("could not parse concenated path str")
         .split(":")
         .map(|x| String::from(x))
         .collect();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{super::command::Command, Engine};
+
+    fn check(input_str: &str) -> Engine {
+        let mut engine = Engine::new();
+
+        let (commands, separators) = Command::parse_input(input_str.to_string() + "\n")
+            .expect("parsing should have succeeded");
+
+        engine
+            .execute_commands_with_separators(commands, separators)
+            .expect("executing should have succeeded");
+        engine
+    }
+
+    #[test]
+    fn test_simple_cmd_execution() {
+        let engine = check("ls");
+        assert!(engine.execution_successful);
+    }
+
+    #[test]
+    fn test_simple_cmd_with_args_execution() {
+        let engine = check("ls -la");
+        assert!(engine.execution_successful);
+
+        let engine = check("ls -la src/");
+        assert!(engine.execution_successful);
+    }
+
+    #[test]
+    fn test_cmd_execution_with_semicolon_separator() {
+        let engine = check("ls -la ; true");
+        assert!(engine.execution_successful);
+
+        let engine = check("false ; true");
+        assert!(engine.execution_successful);
+
+        let engine = check("true ; false");
+        assert!(!engine.execution_successful);
+    }
+
+    #[test]
+    fn test_cmd_execution_with_logical_or_separator() {
+        let engine = check("true || true");
+        assert!(engine.execution_successful);
+
+        let engine = check("false || false");
+        assert!(!engine.execution_successful);
+
+        let engine = check("true || false");
+        assert!(engine.execution_successful);
+
+        let engine = check("false || true");
+        assert!(engine.execution_successful);
+    }
+
+    #[test]
+    fn test_cmd_execution_with_logical_and_separator() {
+        let engine = check("true && true");
+        assert!(engine.execution_successful);
+
+        let engine = check("true && true");
+        assert!(engine.execution_successful);
+
+        let engine = check("true && false");
+        assert!(!engine.execution_successful);
+
+        let engine = check("false && true");
+        assert!(!engine.execution_successful);
+    }
+
+    #[test]
+    fn test_cmd_execution_with_negate_exit_status() {
+        let engine = check("true && ! false");
+        assert!(engine.execution_successful);
+
+        let engine = check("true && ! false");
+        assert!(engine.execution_successful);
+
+        let engine = check("! false || ! true");
+        assert!(engine.execution_successful);
+
+        let engine = check("! true");
+        assert!(!engine.execution_successful);
+    }
 }

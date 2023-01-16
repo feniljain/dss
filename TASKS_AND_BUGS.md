@@ -15,13 +15,14 @@
 - [X] implement `cd` builtin in your own shell
 - [X] print error messages according to errno
 - [X] for invalid path command ( e.g. ./a.sh ) give no such file or directory error
-- [ ] add support for `;`, `||` and `&&` in commands
-- [ ] after stage 1 refactor code to have a separate engine and cmd parsing module
+- [X] add support for `;`, `||` and `&&` in commands
+- [X] add tests for execution status
 - [ ] add support for multiline commands
 - [ ] after stage 1 refactor code to have a separate engine and cmd parsing
     module, as well as break the functions in it down too
 
 ## Bonus Tasks:
+
 - [X] add color depending on exit status
 - [ ] add last segment of current folder like my own zsh with some color
 - [ ] Implement readline like https://github.com/kkawakam/rustyline
