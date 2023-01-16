@@ -31,6 +31,7 @@ struct Command {
     negate_exit_status: bool,
     // Unqualified path = A path not starting with "/" or "../" or "./"
     is_unqualified_path: bool,
+    // is_subshell_cmd: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -49,10 +50,10 @@ impl Separator {
     //     }
     // }
 
-    fn is_separator<T: ToString>(input: T) -> bool {
-        let input_str = input.to_string();
-        input_str == ";" || input_str == "||" || input_str == "&&"
-    }
+    // fn is_separator<T: ToString>(input: T) -> bool {
+    //     let input_str = input.to_string();
+    //     input_str == ";" || input_str == "||" || input_str == "&&"
+    // }
 
     fn to_separator<T: ToString>(input: T) -> Option<Separator> {
         let input_str = input.to_string();
@@ -82,6 +83,8 @@ enum Color {
 enum ShellError {
     #[error("dss: command not found: {0}\n")]
     CommandNotFound(String),
+    #[error("dss: parse error: could not parse: {0}\n")]
+    ParseError(String),
 }
 
 // FIXME: Handle error properly everywhere using ShellError
@@ -151,7 +154,7 @@ fn main() -> anyhow::Result<()> {
             break;
         }
 
-        let (commands, separators) = Command::parse_input(input_str);
+        let (commands, separators) = Command::parse_input(input_str)?;
         if separators.len() == 0 {
             assert!(commands.len() == 1);
 
@@ -211,11 +214,13 @@ fn main() -> anyhow::Result<()> {
 }
 
 impl Command {
-    fn parse_input(input_str: String) -> (Vec<Command>, Vec<Separator>) {
+    fn parse_input(input_str: String) -> anyhow::Result<(Vec<Command>, Vec<Separator>)> {
         // FIXME: This is an ad-hoc implementation,
         // implement proper tokenizer acc. to spec
         let mut commands = vec![];
         let mut separators = vec![];
+
+        let mut err: Option<anyhow::Error> = None;
 
         let mut word = String::new();
         let mut command_strs = vec![];
@@ -224,22 +229,36 @@ impl Command {
             // For single line commands this will be the end
             if ch == '\n' {
                 command_strs.push(word.clone());
-                let command = Command::parse_cmd_str_vec(command_strs.clone());
-                commands.push(command);
-                command_strs = vec![];
+                let parse_result = Command::parse_cmd_str_vec(command_strs.clone());
+                match parse_result {
+                    Ok(command) => {
+                        commands.push(command);
+                        command_strs = vec![];
+                    }
+                    Err(err_) => {
+                        err = Some(err_);
+                    }
+                }
                 ControlFlow::Break::<char>(ch);
+                return;
             }
 
             // FIXME: Here we make an assumption that
             // separators will always be space paadded,
             // correct this assumption
             if ch == ' ' {
-                if Separator::is_separator(&word) {
-                    if let Some(separator) = Separator::to_separator(&word) {
-                        separators.push(separator);
-                        let command = Command::parse_cmd_str_vec(command_strs.clone());
-                        commands.push(command);
-                        command_strs = vec![];
+                if let Some(separator) = Separator::to_separator(&word) {
+                    separators.push(separator);
+                    let parse_result = Command::parse_cmd_str_vec(command_strs.clone());
+                    match parse_result {
+                        Ok(command) => {
+                            commands.push(command);
+                            command_strs = vec![];
+                        }
+                        Err(err_) => {
+                            err = Some(err_);
+                            ControlFlow::Break::<char>(ch);
+                        }
                     }
                 } else {
                     command_strs.push(word.clone());
@@ -250,7 +269,7 @@ impl Command {
             }
         });
 
-        (commands, separators)
+        Ok((commands, separators))
     }
 
     // fn parse_command(cmd_str: &str) -> Command {
@@ -258,7 +277,7 @@ impl Command {
     //     Self::parse_cmd_str_vec(args_with_cmd)
     // }
 
-    fn parse_cmd_str_vec(mut args_with_cmd: Vec<String>) -> Command {
+    fn parse_cmd_str_vec(mut args_with_cmd: Vec<String>) -> anyhow::Result<Command> {
         let mut negate_exit_status = false;
 
         if args_with_cmd[0] == "!" {
@@ -271,6 +290,24 @@ impl Command {
 
             negate_exit_status = true;
         }
+
+        // Parsing subshell command
+        // let len = args_with_cmd.len();
+        // let mut is_subshell_cmd = false;
+        // let mut chars = args_with_cmd[0].chars();
+        // let first_char = chars.next();
+        // let chars = args_with_cmd[len - 1].chars();
+        // let last_char = chars.last();
+        // if (first_char == Some('(') && last_char != Some(')'))
+        //     || (first_char != Some('(') && last_char == Some(')'))
+        // {
+        //     return Err(ShellError::ParseError("expected correct () pair".to_string()).into());
+        // } else if first_char == Some('(') && last_char == Some(')') {
+        //     is_subshell_cmd = true;
+        //     args_with_cmd[0].remove(0);
+        //     let str_len = args_with_cmd[len - 1].len();
+        //     args_with_cmd[len - 1].remove(str_len - 1);
+        // }
 
         let cmd_path = PathBuf::from_str(&args_with_cmd[0])
             .expect("Could not construct path buf from command");
@@ -313,11 +350,12 @@ impl Command {
             negate_exit_status,
             is_unqualified_path: false,
             args_with_cmd,
+            // is_subshell_cmd,
         };
 
         command.is_unqualified_path = is_unqualified_path;
 
-        return command;
+        return Ok(command);
     }
 }
 
@@ -450,10 +488,10 @@ impl Engine {
             "exec" => {
                 // Remove `exec` keyword and then pass the remaining command
                 command.args_with_cmd.remove(0);
-                let command = Command::parse_cmd_str_vec(command.args_with_cmd);
+                let command = Command::parse_cmd_str_vec(command.args_with_cmd)?;
                 self.execute_command_without_forking(command)?;
                 Ok(())
-            },
+            }
             _ => Err(ShellError::CommandNotFound(cmd_str.to_string()).into()),
         }
     }
@@ -535,20 +573,23 @@ mod tests {
 
     #[test]
     fn test_command_input_str_parsing() {
-        let (commands, separators) = Command::parse_input("ls\n".to_string());
+        let (commands, separators) =
+            Command::parse_input("ls\n".to_string()).expect("parsing should have succeeded");
 
         assert!(commands.len() == 1);
         assert!(separators.len() == 0);
         assert!(commands[0].args_with_cmd[0] == "ls".to_string());
 
-        let (commands, separators) = Command::parse_input("ls -la\n".to_string());
+        let (commands, separators) =
+            Command::parse_input("ls -la\n".to_string()).expect("parsing should have succeeded");
 
         assert!(commands.len() == 1);
         assert!(separators.len() == 0);
         assert!(commands[0].args_with_cmd[0] == "ls".to_string());
         assert!(commands[0].args_with_cmd[1] == "-la".to_string());
 
-        let (commands, separators) = Command::parse_input("ls -la ; echo foo\n".to_string());
+        let (commands, separators) = Command::parse_input("ls -la ; echo foo\n".to_string())
+            .expect("parsing should have succeeded");
 
         assert!(commands.len() == 2);
         assert!(separators.len() == 1);
@@ -557,7 +598,8 @@ mod tests {
         assert!(commands[1].args_with_cmd[0] == "echo".to_string());
         assert!(commands[1].args_with_cmd[1] == "foo".to_string());
 
-        let (commands, separators) = Command::parse_input("ls -la || echo foo\n".to_string());
+        let (commands, separators) = Command::parse_input("ls -la || echo foo\n".to_string())
+            .expect("parsing should have succeeded");
 
         assert!(commands.len() == 2);
         assert!(separators.len() == 1);
@@ -566,7 +608,8 @@ mod tests {
         assert!(commands[1].args_with_cmd[0] == "echo".to_string());
         assert!(commands[1].args_with_cmd[1] == "foo".to_string());
 
-        let (commands, separators) = Command::parse_input("ls -la && echo foo\n".to_string());
+        let (commands, separators) = Command::parse_input("ls -la && echo foo\n".to_string())
+            .expect("parsing should have succeeded");
 
         assert!(commands.len() == 2);
         assert!(separators.len() == 1);
