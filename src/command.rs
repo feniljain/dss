@@ -1,4 +1,4 @@
-use std::{ffi::CString, path::PathBuf, ops::ControlFlow, str::FromStr};
+use std::{ffi::CString, ops::ControlFlow, path::PathBuf, str::FromStr};
 
 use crate::errors::ShellError;
 
@@ -29,6 +29,7 @@ impl Command {
         input_str.chars().for_each(|ch| {
             if capture_subshell_input && ch != ')' {
                 subshell_input.push(ch);
+                word = String::new();
                 ControlFlow::Continue::<()>(());
                 return;
             }
@@ -57,6 +58,9 @@ impl Command {
             if ch == ' ' {
                 if let Some(separator) = Separator::to_separator(&word) {
                     separators.push(separator);
+                    println!(
+                        "word: {word:?}, command_strs: {command_strs:?}, input_str: {input_str:?}"
+                    );
                     let parse_result = Command::parse_cmd_str_vec(command_strs.clone());
                     match parse_result {
                         Ok(command) => {
@@ -69,7 +73,10 @@ impl Command {
                         }
                     }
                 } else {
+                    // if word != "" {
+                    println!("word on space, and not being separator: {:?}", word);
                     command_strs.push(word.clone());
+                    // }
                 }
                 word = String::new();
             } else if ch == '(' {
@@ -79,7 +86,7 @@ impl Command {
                 println!("Subshell Input: {:?}", subshell_input);
                 // FIXME: Adding a new line here as our parsing code depends on it a lot,
                 // possibly fix this dependency
-                let result = Command::parse_input(subshell_input.clone()+"\n");
+                let result = Command::parse_input(subshell_input.clone() + "\n");
                 match result {
                     Ok((mut commands_, mut separators_)) => {
                         commands.append(&mut commands_);
@@ -286,7 +293,6 @@ mod tests {
         assert_eq!(separators[0], Separator::LogicalOr);
         assert_eq!(commands[1].args_with_cmd[0], "echo".to_string());
         assert_eq!(commands[1].args_with_cmd[1], "foo".to_string());
-
     }
 
     #[test]
@@ -301,7 +307,7 @@ mod tests {
         assert_eq!(separators[0], Separator::LogicalAnd);
         assert_eq!(commands[1].args_with_cmd[0], "echo".to_string());
         assert_eq!(commands[1].args_with_cmd[1], "foo".to_string());
-        // Testing parsing of `&&`
+
         let (commands, separators) = check("cd /tmp && pwd");
 
         assert_eq!(commands.len(), 2);
@@ -339,20 +345,19 @@ mod tests {
         assert!(commands[0].negate_exit_status);
         assert_eq!(commands[1].args_with_cmd[0], "echo".to_string());
         assert_eq!(commands[1].args_with_cmd[1], "foo".to_string());
-
     }
 
-    // #[test]
-    // fn test_cmd_parsing_for_subshell_execution() {
-    //     // Testing command parsing for subshell execution, i.e. within `()`
-    //     let (commands, separators) = check("(cd /tmp && pwd); pwd");
+    #[test]
+    fn test_cmd_parsing_for_subshell_execution() {
+        // Testing command parsing for subshell execution, i.e. within `()`
+        let (commands, separators) = check("(cd /tmp && pwd) ; pwd");
 
-    //     println!("commands: {:?}", commands);
-    //     assert_eq!(commands.len(), 3);
-    //     assert_eq!(separators.len(), 2);
-    //     assert_eq!(commands[0].args_with_cmd[0], "cd".to_string());
-    //     assert_eq!(commands[0].args_with_cmd[1], "/tmp".to_string());
-    //     assert_eq!(commands[1].args_with_cmd[0], "pwd".to_string());
-    //     assert_eq!(commands[2].args_with_cmd[0], "pwd".to_string());
-    // }
+        println!("commands: {commands:?}");
+        assert_eq!(commands.len(), 3);
+        assert_eq!(separators.len(), 2);
+        assert_eq!(commands[0].args_with_cmd[0], "cd".to_string());
+        assert_eq!(commands[0].args_with_cmd[1], "/tmp".to_string());
+        assert_eq!(commands[1].args_with_cmd[0], "pwd".to_string());
+        assert_eq!(commands[2].args_with_cmd[0], "pwd".to_string());
+    }
 }

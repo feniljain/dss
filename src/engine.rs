@@ -310,6 +310,10 @@ fn parse_paths() -> Vec<String> {
 mod tests {
     use super::{super::command::Command, Engine};
 
+    // Trying to use `true` and `false` in tests here
+    // cause they are readily available on UNIX systems
+    // or are easy to replicate behaviour of too
+
     fn check(input_str: &str) -> Engine {
         let mut engine = Engine::new();
 
