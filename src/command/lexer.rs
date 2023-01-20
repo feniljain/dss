@@ -2,7 +2,7 @@ use std::str::Chars;
 
 use crate::errors::{LexError, ShellError};
 
-use super::token::{Operators, Token, TokenType};
+use super::token::{Keyword, Operators, Token, TokenType, Word};
 
 pub struct Lexer<'a> {
     pub tokens: Vec<Token>,
@@ -67,10 +67,10 @@ impl<'a> Lexer<'a> {
                     if let Some(TokenType::Operators(op)) = &self.ctx.last_token_type.clone() {
                         if op == &Operators::And {
                             self.tokens.pop();
-                            self.delimit_word_and_add_token();
                             self.add_token("&&", TokenType::Operators(Operators::AndIf));
                         }
                     } else {
+                        self.delimit_word_and_add_token();
                         self.ctx.last_token_type = Some(TokenType::Operators(Operators::And));
                         /* 3. If the previous character was used as part of an operator and
                          * the current char cannot be used with the previous chars to
@@ -84,10 +84,10 @@ impl<'a> Lexer<'a> {
                     if let Some(TokenType::Operators(op)) = &self.ctx.last_token_type {
                         if op == &Operators::Or {
                             self.tokens.pop();
-                            self.delimit_word_and_add_token();
                             self.add_token("||", TokenType::Operators(Operators::OrIf));
                         }
                     } else {
+                        self.delimit_word_and_add_token();
                         self.ctx.last_token_type = Some(TokenType::Operators(Operators::Or));
                         self.add_token("|", TokenType::Operators(Operators::Or));
                     }
@@ -102,7 +102,7 @@ impl<'a> Lexer<'a> {
                 ')' => {
                     self.delimit_word_and_add_token();
                     self.add_token(")", TokenType::RightParen);
-                },
+                }
 
                 ' ' => self.delimit_word_and_add_token(),
                 _ => {
@@ -125,8 +125,13 @@ impl<'a> Lexer<'a> {
     }
 
     fn delimit_word_and_add_token(&mut self) {
-        self.add_token(self.ctx.word.clone(), TokenType::Word);
-        self.ctx.last_token_type = Some(TokenType::Word);
+        let token_type = match self.ctx.word.as_str() {
+            "exit" => TokenType::Word(Word::Keyword(Keyword::Exit)),
+            _ => TokenType::Word(Word::Text),
+        };
+
+        self.ctx.last_token_type = Some(token_type.clone());
+        self.add_token(self.ctx.word.clone(), token_type);
         self.ctx.word = String::new();
     }
 
@@ -146,7 +151,7 @@ impl<'a> Lexer<'a> {
         let mut end_offset = self.ctx.offset;
 
         match &token_type {
-            TokenType::Word => {
+            TokenType::Word(_) => {
                 // For words, we either delimit them on space or newline
                 // so the offsets received are of the space or newline char
                 //
@@ -218,6 +223,12 @@ mod tests {
         lexer
     }
 
+    // Do not keep insta::assert_debug_snapshot!(lexer.tokens)
+    // as common code in check because it forms snapshots with name
+    // `check-{i}`; 1 <= 0 <= n
+    //
+    // we instead want test function names as the snapshot names
+
     #[test]
     fn test_simple_cmd_lexing() {
         let lexer = check("ls\n");
@@ -240,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cmd_lexing_of_semicolon_logical_or() {
+    fn test_cmd_lexing_of_logical_or() {
         let lexer = check("ls -la || echo foo\n");
         insta::assert_debug_snapshot!(lexer.tokens);
 
@@ -249,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cmd_lexing_of_semicolon_logical_and() {
+    fn test_cmd_lexing_of_logical_and() {
         let lexer = check("ls -la && echo foo\n");
         insta::assert_debug_snapshot!(lexer.tokens);
 
@@ -272,6 +283,12 @@ mod tests {
     #[test]
     fn test_lexing_of_subshell_cmds() {
         let lexer = check("(! ls -la)&& echo foo\n");
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_cmd_with_keyword() {
+        let lexer = check("ls -la&& exit\n");
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 }

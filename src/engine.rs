@@ -20,7 +20,7 @@ use std::{
 };
 
 use crate::{
-    command::{Command, Separator, lexer::Lexer},
+    command::{Command, Separator, lexer::Lexer, parser::Parser},
     errors::ShellError,
     writer::{write_error_to_shell, write_to_shell, write_to_shell_colored, Color},
 };
@@ -63,18 +63,21 @@ impl Engine {
                 continue;
             }
 
-            if input_str == "exit" {
+            if input_str.trim() == "exit" {
                 break;
             }
 
             let mut lexer = Lexer::new(&input_str);
-            lexer.scan()?;
+            let tokens = lexer.scan()?;
 
-            let (commands, separators) = Command::parse_input(input_str)?;
-            let break_term_loop = self.execute_commands_with_separators(commands, separators)?;
-            if break_term_loop {
-                break;
-            }
+            let mut parser = Parser::new(tokens);
+            // parser.
+
+            // let (commands, separators) = Command::parse_input(input_str)?;
+            // let break_term_loop = self.execute_commands_with_separators(commands, separators)?;
+            // if break_term_loop {
+            //     break;
+            // }
         }
 
         Ok(())

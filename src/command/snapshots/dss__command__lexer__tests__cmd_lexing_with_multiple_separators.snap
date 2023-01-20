@@ -5,7 +5,9 @@ expression: lexer.tokens
 [
     Token {
         lexeme: "false",
-        token_type: Word,
+        token_type: Word(
+            Text,
+        ),
         line: 0,
         range: (
             0,
@@ -25,7 +27,9 @@ expression: lexer.tokens
     },
     Token {
         lexeme: "echo",
-        token_type: Word,
+        token_type: Word(
+            Text,
+        ),
         line: 0,
         range: (
             9,
@@ -34,7 +38,9 @@ expression: lexer.tokens
     },
     Token {
         lexeme: "foo",
-        token_type: Word,
+        token_type: Word(
+            Text,
+        ),
         line: 0,
         range: (
             14,
@@ -54,7 +60,9 @@ expression: lexer.tokens
     },
     Token {
         lexeme: "echo",
-        token_type: Word,
+        token_type: Word(
+            Text,
+        ),
         line: 0,
         range: (
             21,
@@ -63,7 +71,9 @@ expression: lexer.tokens
     },
     Token {
         lexeme: "bar",
-        token_type: Word,
+        token_type: Word(
+            Text,
+        ),
         line: 0,
         range: (
             26,

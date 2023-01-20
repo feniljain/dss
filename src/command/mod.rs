@@ -1,4 +1,5 @@
 pub mod lexer;
+pub mod parser;
 pub mod token;
 
 use std::{ffi::CString, ops::ControlFlow, path::PathBuf, str::FromStr};
