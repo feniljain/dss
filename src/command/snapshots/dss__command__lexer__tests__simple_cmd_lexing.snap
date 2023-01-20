@@ -1,0 +1,15 @@
+---
+source: src/command/lexer.rs
+expression: lexer.tokens
+---
+[
+    Token {
+        lexeme: "ls",
+        token_type: Word,
+        line: 0,
+        range: (
+            0,
+            1,
+        ),
+    },
+]

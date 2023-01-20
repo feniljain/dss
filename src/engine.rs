@@ -20,7 +20,7 @@ use std::{
 };
 
 use crate::{
-    command::{Command, Separator},
+    command::{Command, Separator, lexer::Lexer},
     errors::ShellError,
     writer::{write_error_to_shell, write_to_shell, write_to_shell_colored, Color},
 };
@@ -46,7 +46,6 @@ impl Engine {
 
         let term = Arc::new(AtomicBool::new(false));
         signal_hook::flag::register(consts::SIGINT, Arc::clone(&term))?;
-
         while !term.load(Ordering::Relaxed) {
             if !self.execution_successful {
                 write_to_shell_colored("$ ", Color::Red)?;
@@ -67,6 +66,9 @@ impl Engine {
             if input_str == "exit" {
                 break;
             }
+
+            let mut lexer = Lexer::new(&input_str);
+            lexer.scan()?;
 
             let (commands, separators) = Command::parse_input(input_str)?;
             let break_term_loop = self.execute_commands_with_separators(commands, separators)?;

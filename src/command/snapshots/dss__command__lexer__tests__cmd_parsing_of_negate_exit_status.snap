@@ -1,0 +1,64 @@
+---
+source: src/command/lexer.rs
+expression: lexer.tokens
+---
+[
+    Token {
+        lexeme: "!",
+        token_type: Operators(
+            Exclamation,
+        ),
+        line: 0,
+        range: (
+            0,
+            0,
+        ),
+    },
+    Token {
+        lexeme: "ls",
+        token_type: Word,
+        line: 0,
+        range: (
+            2,
+            3,
+        ),
+    },
+    Token {
+        lexeme: "-la",
+        token_type: Word,
+        line: 0,
+        range: (
+            5,
+            7,
+        ),
+    },
+    Token {
+        lexeme: "&&",
+        token_type: Operators(
+            AndIf,
+        ),
+        line: 0,
+        range: (
+            9,
+            10,
+        ),
+    },
+    Token {
+        lexeme: "echo",
+        token_type: Word,
+        line: 0,
+        range: (
+            12,
+            15,
+        ),
+    },
+    Token {
+        lexeme: "foo",
+        token_type: Word,
+        line: 0,
+        range: (
+            17,
+            19,
+        ),
+    },
+]

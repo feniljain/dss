@@ -1,0 +1,53 @@
+---
+source: src/command/lexer.rs
+expression: lexer.tokens
+---
+[
+    Token {
+        lexeme: "ls",
+        token_type: Word,
+        line: 0,
+        range: (
+            0,
+            1,
+        ),
+    },
+    Token {
+        lexeme: "-la",
+        token_type: Word,
+        line: 0,
+        range: (
+            3,
+            5,
+        ),
+    },
+    Token {
+        lexeme: ";",
+        token_type: Operators(
+            Semicolon,
+        ),
+        line: 0,
+        range: (
+            6,
+            6,
+        ),
+    },
+    Token {
+        lexeme: "echo",
+        token_type: Word,
+        line: 0,
+        range: (
+            8,
+            11,
+        ),
+    },
+    Token {
+        lexeme: "foo",
+        token_type: Word,
+        line: 0,
+        range: (
+            13,
+            15,
+        ),
+    },
+]
