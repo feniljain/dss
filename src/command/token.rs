@@ -18,7 +18,7 @@ impl Display for Token {
 #[derive(Debug, Clone)]
 pub enum TokenType {
     Word(Word),
-    Operators(Operators),
+    Operator(Operator),
     LeftParen,
     RightParen,
 }
@@ -27,7 +27,7 @@ impl Display for TokenType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let variant_str = match self {
             TokenType::Word(word) => word.to_string(),
-            TokenType::Operators(op) => op.to_string(),
+            TokenType::Operator(op) => op.to_string(),
             TokenType::LeftParen => "(".into(),
             TokenType::RightParen => ")".into(),
         };
@@ -69,7 +69,7 @@ impl Display for Keyword {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Operators {
+pub enum Operator {
     And, // "&"
     AndIf, // "&&"
     Or,  // "|"
@@ -78,15 +78,15 @@ pub enum Operators {
     Exclamation,  // "!"
 }
 
-impl Display for Operators {
+impl Display for Operator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let variant_str = match self {
-            Operators::AndIf => "&&",
-            Operators::OrIf => "||",
-            Operators::Semicolon => ";",
-            Operators::And => "&",
-            Operators::Or => "|",
-            Operators::Exclamation => "!",
+            Operator::AndIf => "&&",
+            Operator::OrIf => "||",
+            Operator::Semicolon => ";",
+            Operator::And => "&",
+            Operator::Or => "|",
+            Operator::Exclamation => "!",
         };
 
         write!(f, "{}", variant_str)

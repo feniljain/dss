@@ -8,6 +8,8 @@ pub enum ShellError {
     ParseError(String),
     #[error("dss: scan error: {0}\n")]
     LexError(LexError),
+    #[error("dss: internal error [BUG]: {0}\n")]
+    InternalError(String),
 }
 
 #[derive(Error, Debug)]

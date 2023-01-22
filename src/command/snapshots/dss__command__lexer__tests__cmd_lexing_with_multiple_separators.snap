@@ -16,7 +16,7 @@ expression: lexer.tokens
     },
     Token {
         lexeme: "&&",
-        token_type: Operators(
+        token_type: Operator(
             AndIf,
         ),
         line: 0,
@@ -49,7 +49,7 @@ expression: lexer.tokens
     },
     Token {
         lexeme: "||",
-        token_type: Operators(
+        token_type: Operator(
             OrIf,
         ),
         line: 0,

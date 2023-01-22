@@ -27,7 +27,7 @@ expression: lexer.tokens
     },
     Token {
         lexeme: ";",
-        token_type: Operators(
+        token_type: Operator(
             Semicolon,
         ),
         line: 0,

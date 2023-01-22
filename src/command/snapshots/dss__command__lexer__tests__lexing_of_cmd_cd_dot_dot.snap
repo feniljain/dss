@@ -1,0 +1,28 @@
+---
+source: src/command/lexer.rs
+expression: lexer.tokens
+---
+[
+    Token {
+        lexeme: "cd",
+        token_type: Word(
+            Text,
+        ),
+        line: 0,
+        range: (
+            0,
+            1,
+        ),
+    },
+    Token {
+        lexeme: "..",
+        token_type: Word(
+            Text,
+        ),
+        line: 0,
+        range: (
+            3,
+            4,
+        ),
+    },
+]

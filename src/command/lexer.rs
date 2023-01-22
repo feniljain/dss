@@ -2,7 +2,7 @@ use std::str::Chars;
 
 use crate::errors::{LexError, ShellError};
 
-use super::token::{Keyword, Operators, Token, TokenType, Word};
+use super::token::{Keyword, Operator, Token, TokenType, Word};
 
 pub struct Lexer<'a> {
     pub tokens: Vec<Token>,
@@ -64,40 +64,40 @@ impl<'a> Lexer<'a> {
                  * to form an operator, it shall be used as part of that (operator) token.
                  */
                 '&' => {
-                    if let Some(TokenType::Operators(op)) = &self.ctx.last_token_type.clone() {
-                        if op == &Operators::And {
+                    if let Some(TokenType::Operator(op)) = &self.ctx.last_token_type.clone() {
+                        if op == &Operator::And {
                             self.tokens.pop();
-                            self.add_token("&&", TokenType::Operators(Operators::AndIf));
+                            self.add_token("&&", TokenType::Operator(Operator::AndIf));
                         }
                     } else {
                         self.delimit_word_and_add_token();
-                        self.ctx.last_token_type = Some(TokenType::Operators(Operators::And));
+                        self.ctx.last_token_type = Some(TokenType::Operator(Operator::And));
                         /* 3. If the previous character was used as part of an operator and
                          * the current char cannot be used with the previous chars to
                          * form an operator, the operator containing the previous char
                          * shall be delimited.
                          * */
-                        self.add_token("&", TokenType::Operators(Operators::And));
+                        self.add_token("&", TokenType::Operator(Operator::And));
                     }
                 }
                 '|' => {
-                    if let Some(TokenType::Operators(op)) = &self.ctx.last_token_type {
-                        if op == &Operators::Or {
+                    if let Some(TokenType::Operator(op)) = &self.ctx.last_token_type {
+                        if op == &Operator::Or {
                             self.tokens.pop();
-                            self.add_token("||", TokenType::Operators(Operators::OrIf));
+                            self.add_token("||", TokenType::Operator(Operator::OrIf));
                         }
                     } else {
                         self.delimit_word_and_add_token();
-                        self.ctx.last_token_type = Some(TokenType::Operators(Operators::Or));
-                        self.add_token("|", TokenType::Operators(Operators::Or));
+                        self.ctx.last_token_type = Some(TokenType::Operator(Operator::Or));
+                        self.add_token("|", TokenType::Operator(Operator::Or));
                     }
                 }
                 ';' => {
                     self.delimit_word_and_add_token();
-                    self.add_token(";", TokenType::Operators(Operators::Semicolon));
+                    self.add_token(";", TokenType::Operator(Operator::Semicolon));
                 }
 
-                '!' => self.add_token("!", TokenType::Operators(Operators::Exclamation)),
+                '!' => self.add_token("!", TokenType::Operator(Operator::Exclamation)),
                 '(' => self.add_token("(", TokenType::LeftParen),
                 ')' => {
                     self.delimit_word_and_add_token();
@@ -196,7 +196,7 @@ fn is_valid_name_char(ch: char) -> bool {
 }
 
 fn is_valid_name_special_char(ch: char) -> bool {
-    ch == '_' || ch == '-'
+    ch == '_' || ch == '-' || ch == '.' || ch == '/'
 }
 
 fn is_alpha_numeric(ch: char) -> bool {
@@ -289,6 +289,18 @@ mod tests {
     #[test]
     fn test_lexing_of_cmd_with_keyword() {
         let lexer = check("ls -la&& exit\n");
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_cmd_cd_dot_dot() {
+        let lexer = check("cd ..\n");
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_cmd_with_unqualified_path() {
+        let lexer = check("./ls\n");
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 }

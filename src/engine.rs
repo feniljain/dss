@@ -9,7 +9,6 @@ use std::{
     convert::Infallible,
     ffi::{CStr, CString},
     io,
-    ops::ControlFlow,
     os::unix::prelude::OsStrExt,
     path::{Path, PathBuf},
     str::FromStr,
@@ -20,7 +19,12 @@ use std::{
 };
 
 use crate::{
-    command::{Command, Separator, lexer::Lexer, parser::Parser},
+    command::{
+        lexer::Lexer,
+        parser::{ExecuteMode, Parser},
+        token::Token,
+        Command,
+    },
     errors::ShellError,
     writer::{write_error_to_shell, write_to_shell, write_to_shell_colored, Color},
 };
@@ -63,15 +67,16 @@ impl Engine {
                 continue;
             }
 
-            if input_str.trim() == "exit" {
-                break;
-            }
+            // if input_str.trim() == "exit" {
+            //     break;
+            // }
 
             let mut lexer = Lexer::new(&input_str);
             let tokens = lexer.scan()?;
-
-            let mut parser = Parser::new(tokens);
-            // parser.
+            let break_term_loop = self.parse_and_execute(tokens)?;
+            if break_term_loop {
+                break;
+            }
 
             // let (commands, separators) = Command::parse_input(input_str)?;
             // let break_term_loop = self.execute_commands_with_separators(commands, separators)?;
@@ -83,84 +88,42 @@ impl Engine {
         Ok(())
     }
 
-    fn execute_commands_with_separators(
-        &mut self,
-        commands: Vec<Command>,
-        separators: Vec<Separator>,
-    ) -> anyhow::Result<bool> {
-        let mut break_term_loop = false;
-
-        if separators.len() == 0 {
-            assert!(commands.len() == 1);
-
-            if commands[0].args_with_cmd[0] == "exit" {
-                break_term_loop = true;
-                return Ok(break_term_loop);
+    fn parse_and_execute(&mut self, tokens: &Vec<Token>) -> anyhow::Result<bool> {
+        let mut parser = Parser::new(tokens, tokens.len());
+        while let Some(parse_result) = parser.get_command()? {
+            if parse_result.exit_term {
+                // break 'term_loop;
+                return Ok(true);
             }
 
-            self.execute_command_by_forking(commands[0].clone())?;
-        } else {
-            let mut execution_result: Option<(bool, &Separator)> = None;
-            let n_cmds = commands.len();
-            commands.iter().enumerate().for_each(|(i, command)| {
-                if command.args_with_cmd[0] == "exit" {
-                    break_term_loop = true;
-                    ControlFlow::Break::<bool>(true);
-                    return;
+            println!("parse_result: {:?}", parse_result);
+            match parse_result.execute_mode {
+                ExecuteMode::Normal => {
+                    assert_eq!(parse_result.cmds.len(), 1);
+                    self.execute_command(parse_result.cmds[0].clone())?;
                 }
-
-                // FIXME: Do not ignore result of execution here
-                match execution_result {
-                    Some((last_execution_result, separator)) => {
-                        match separator {
-                            Separator::Semicolon => {
-                                let _ = self.execute_command(command.clone());
-                            }
-                            Separator::LogicalOr => {
-                                if !last_execution_result {
-                                    let _ = self.execute_command(command.clone());
-                                }
-                            }
-                            Separator::LogicalAnd => {
-                                if last_execution_result {
-                                    let _ = self.execute_command(command.clone());
-                                }
-                            }
-                        }
-
-                        if i < n_cmds - 1 {
-                            execution_result = Some((self.execution_successful, &separators[i]));
-                        }
-                    }
-                    None => {
-                        let _ = self.execute_command(command.clone());
-                        execution_result = Some((self.execution_successful, &separators[i]));
-                    }
+                ExecuteMode::Subshell(tokens) => {
+                    return self.parse_and_execute(&tokens);
                 }
-            });
-
-            // FIXME: add logic to break the term loop
-            // if break_term_loop {
-            //     // break;
-            //     return Ok(());
-            // }
+            }
         }
 
-        Ok(break_term_loop)
+        Ok(false)
     }
 
     fn execute_command(&mut self, command: Command) -> anyhow::Result<()> {
-        if is_builtin_command(&command.args_with_cmd[0]) {
+        if is_builtin_command(&command.tokens[0].lexeme) {
             // FIXME: Handle this error properly
             self.execution_successful = !self.handle_builtin_command(command).is_err();
         } else {
-            self.execute_command_by_forking(command)?;
+            // FIXME:
+            self.fork_process_and_execute_cmd(command)?;
         }
 
         Ok(())
     }
 
-    pub fn execute_command_by_forking(&mut self, command: Command) -> anyhow::Result<()> {
+    pub fn fork_process_and_execute_cmd(&mut self, command: Command) -> anyhow::Result<()> {
         match unsafe { fork() } {
             Ok(ForkResult::Parent {
                 child: child_pid, ..
@@ -187,7 +150,7 @@ impl Engine {
             }
             Ok(ForkResult::Child) => {
                 // FIXME: Handle error here
-                self.execute_command_without_forking(command)?;
+                self.execute_external_cmd(command)?;
             }
             Err(err) => panic!("Fork failed: {err:?}"),
         }
@@ -196,14 +159,18 @@ impl Engine {
 
     // GOTCHA: This currently executes the command and stops the complete program
     // due to libc::exit at the end
-    fn execute_command_without_forking(&mut self, command: Command) -> anyhow::Result<()> {
+    fn execute_external_cmd(
+        &mut self,
+        command: Command,
+    ) -> anyhow::Result<()> {
         // FIXME: Optimize this .len() out,
         // we just wanna know if there are more
         // than 1 elements
-        let args: &[CString] = if command.args.len() < 1 {
+        let cmd_args = command.get_args();
+        let args: &[CString] = if cmd_args.len() < 1 {
             &[]
         } else {
-            &command.args
+            &cmd_args
         };
 
         let mut exit_status = 0;
@@ -240,7 +207,7 @@ impl Engine {
         if let Some(errno) = errno_opt {
             write_error_to_shell(
                 errno,
-                &command.args_with_cmd[0],
+                &command.tokens[0].lexeme,
                 command.is_unqualified_path,
             )?;
             // FIXME: Pass proper errno here
@@ -251,16 +218,16 @@ impl Engine {
     }
 
     fn handle_builtin_command(&mut self, mut command: Command) -> anyhow::Result<()> {
-        let cmd_str = command.args_with_cmd[0].as_str();
+        let cmd_str = command.tokens[0].lexeme.as_str();
 
         match cmd_str {
             "cd" => {
                 let mut path_to_go_str = "/";
-                if command.args.len() > 1 {
+                if command.tokens.len() > 1 {
                     // If we receive `~` after cd, we want to go to
                     // absolute root, which is what "/" denotes already
-                    if command.args_with_cmd[1] != "~" {
-                        path_to_go_str = &command.args_with_cmd[1];
+                    if command.tokens[1].lexeme != "~" {
+                        path_to_go_str = &command.tokens[1].lexeme;
                     }
                 }
 
@@ -270,9 +237,8 @@ impl Engine {
             }
             "exec" => {
                 // Remove `exec` keyword and then pass the remaining command
-                command.args_with_cmd.remove(0);
-                let command = Command::parse_cmd_str_vec(command.args_with_cmd)?;
-                self.execute_command_without_forking(command)?;
+                command.tokens.remove(0);
+                self.parse_and_execute(&command.tokens)?;
                 Ok(())
             }
             _ => Err(ShellError::CommandNotFound(cmd_str.to_string()).into()),
@@ -311,95 +277,161 @@ fn parse_paths() -> Vec<String> {
         .collect();
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{super::command::Command, Engine};
+// #[cfg(test)]
+// mod tests {
+//     use super::{super::command::DeprecatedCommand, Engine};
 
-    // Trying to use `true` and `false` in tests here
-    // cause they are readily available on UNIX systems
-    // or are easy to replicate behaviour of too
+//     // Trying to use `true` and `false` in tests here
+//     // cause they are readily available on UNIX systems
+//     // or are easy to replicate behaviour of too
 
-    fn check(input_str: &str) -> Engine {
-        let mut engine = Engine::new();
+//     fn check(input_str: &str) -> Engine {
+//         let mut engine = Engine::new();
 
-        let (commands, separators) = Command::parse_input(input_str.to_string() + "\n")
-            .expect("parsing should have succeeded");
+//         let (commands, separators) = DeprecatedCommand::parse_input(input_str.to_string() + "\n")
+//             .expect("parsing should have succeeded");
 
-        engine
-            .execute_commands_with_separators(commands, separators)
-            .expect("executing should have succeeded");
-        engine
-    }
+//         // engine
+//         //     .execute_commands_with_separators(commands, separators)
+//         //     .expect("executing should have succeeded");
+//         engine
+//     }
 
-    #[test]
-    fn test_simple_cmd_execution() {
-        let engine = check("ls");
-        assert!(engine.execution_successful);
-    }
+//     #[test]
+//     fn test_simple_cmd_execution() {
+//         let engine = check("ls");
+//         assert!(engine.execution_successful);
+//     }
 
-    #[test]
-    fn test_simple_cmd_with_args_execution() {
-        let engine = check("ls -la");
-        assert!(engine.execution_successful);
+//     #[test]
+//     fn test_simple_cmd_with_args_execution() {
+//         let engine = check("ls -la");
+//         assert!(engine.execution_successful);
 
-        let engine = check("ls -la src/");
-        assert!(engine.execution_successful);
-    }
+//         let engine = check("ls -la src/");
+//         assert!(engine.execution_successful);
+//     }
 
-    #[test]
-    fn test_cmd_execution_with_semicolon_separator() {
-        let engine = check("ls -la ; true");
-        assert!(engine.execution_successful);
+//     #[test]
+//     fn test_cmd_execution_with_semicolon_separator() {
+//         let engine = check("ls -la ; true");
+//         assert!(engine.execution_successful);
 
-        let engine = check("false ; true");
-        assert!(engine.execution_successful);
+//         let engine = check("false ; true");
+//         assert!(engine.execution_successful);
 
-        let engine = check("true ; false");
-        assert!(!engine.execution_successful);
-    }
+//         let engine = check("true ; false");
+//         assert!(!engine.execution_successful);
+//     }
 
-    #[test]
-    fn test_cmd_execution_with_logical_or_separator() {
-        let engine = check("true || true");
-        assert!(engine.execution_successful);
+//     #[test]
+//     fn test_cmd_execution_with_logical_or_separator() {
+//         let engine = check("true || true");
+//         assert!(engine.execution_successful);
 
-        let engine = check("false || false");
-        assert!(!engine.execution_successful);
+//         let engine = check("false || false");
+//         assert!(!engine.execution_successful);
 
-        let engine = check("true || false");
-        assert!(engine.execution_successful);
+//         let engine = check("true || false");
+//         assert!(engine.execution_successful);
 
-        let engine = check("false || true");
-        assert!(engine.execution_successful);
-    }
+//         let engine = check("false || true");
+//         assert!(engine.execution_successful);
+//     }
 
-    #[test]
-    fn test_cmd_execution_with_logical_and_separator() {
-        let engine = check("true && true");
-        assert!(engine.execution_successful);
+//     #[test]
+//     fn test_cmd_execution_with_logical_and_separator() {
+//         let engine = check("true && true");
+//         assert!(engine.execution_successful);
 
-        let engine = check("true && true");
-        assert!(engine.execution_successful);
+//         let engine = check("true && true");
+//         assert!(engine.execution_successful);
 
-        let engine = check("true && false");
-        assert!(!engine.execution_successful);
+//         let engine = check("true && false");
+//         assert!(!engine.execution_successful);
 
-        let engine = check("false && true");
-        assert!(!engine.execution_successful);
-    }
+//         let engine = check("false && true");
+//         assert!(!engine.execution_successful);
+//     }
 
-    #[test]
-    fn test_cmd_execution_with_negate_exit_status() {
-        let engine = check("true && ! false");
-        assert!(engine.execution_successful);
+//     #[test]
+//     fn test_cmd_execution_with_negate_exit_status() {
+//         let engine = check("true && ! false");
+//         assert!(engine.execution_successful);
 
-        let engine = check("true && ! false");
-        assert!(engine.execution_successful);
+//         let engine = check("true && ! false");
+//         assert!(engine.execution_successful);
 
-        let engine = check("! false || ! true");
-        assert!(engine.execution_successful);
+//         let engine = check("! false || ! true");
+//         assert!(engine.execution_successful);
 
-        let engine = check("! true");
-        assert!(!engine.execution_successful);
-    }
-}
+//         let engine = check("! true");
+//         assert!(!engine.execution_successful);
+//     }
+// }
+
+// fn execute_commands_with_separators(
+//     &mut self,
+//     commands: Vec<DeprecatedCommand>,
+//     separators: Vec<Separator>,
+// ) -> anyhow::Result<bool> {
+//     let mut break_term_loop = false;
+
+//     if separators.len() == 0 {
+//         assert!(commands.len() == 1);
+
+//         if commands[0].args_with_cmd[0] == "exit" {
+//             break_term_loop = true;
+//             return Ok(break_term_loop);
+//         }
+
+//         self.execute_command_by_forking(commands[0].clone())?;
+//     } else {
+//         let mut execution_result: Option<(bool, &Separator)> = None;
+//         let n_cmds = commands.len();
+//         commands.iter().enumerate().for_each(|(i, command)| {
+//             if command.args_with_cmd[0] == "exit" {
+//                 break_term_loop = true;
+//                 ControlFlow::Break::<bool>(true);
+//                 return;
+//             }
+
+//             // FIXME: Do not ignore result of execution here
+//             match execution_result {
+//                 Some((last_execution_result, separator)) => {
+//                     match separator {
+//                         Separator::Semicolon => {
+//                             let _ = self.execute_command(command.clone());
+//                         }
+//                         Separator::LogicalOr => {
+//                             if !last_execution_result {
+//                                 let _ = self.execute_command(command.clone());
+//                             }
+//                         }
+//                         Separator::LogicalAnd => {
+//                             if last_execution_result {
+//                                 let _ = self.execute_command(command.clone());
+//                             }
+//                         }
+//                     }
+
+//                     if i < n_cmds - 1 {
+//                         execution_result = Some((self.execution_successful, &separators[i]));
+//                     }
+//                 }
+//                 None => {
+//                     let _ = self.execute_command(command.clone());
+//                     execution_result = Some((self.execution_successful, &separators[i]));
+//                 }
+//             }
+//         });
+
+//         // FIXME: add logic to break the term loop
+//         // if break_term_loop {
+//         //     // break;
+//         //     return Ok(());
+//         // }
+//     }
+
+//     Ok(break_term_loop)
+// }

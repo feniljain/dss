@@ -1,0 +1,107 @@
+---
+source: src/command/parser.rs
+expression: results
+---
+[
+    ParseResult {
+        cmds: [
+            Command {
+                tokens: [
+                    Token {
+                        lexeme: "false",
+                        token_type: Word(
+                            Text,
+                        ),
+                        line: 0,
+                        range: (
+                            0,
+                            4,
+                        ),
+                    },
+                ],
+                path: "false",
+                negate_exit_status: false,
+                is_unqualified_path: false,
+            },
+        ],
+        execute_mode: Normal,
+        exit_term: false,
+        operator_for_next_exec: Some(
+            AndIf,
+        ),
+    },
+    ParseResult {
+        cmds: [
+            Command {
+                tokens: [
+                    Token {
+                        lexeme: "echo",
+                        token_type: Word(
+                            Text,
+                        ),
+                        line: 0,
+                        range: (
+                            9,
+                            12,
+                        ),
+                    },
+                    Token {
+                        lexeme: "foo",
+                        token_type: Word(
+                            Text,
+                        ),
+                        line: 0,
+                        range: (
+                            14,
+                            16,
+                        ),
+                    },
+                ],
+                path: "echo",
+                negate_exit_status: false,
+                is_unqualified_path: false,
+            },
+        ],
+        execute_mode: Normal,
+        exit_term: false,
+        operator_for_next_exec: Some(
+            OrIf,
+        ),
+    },
+    ParseResult {
+        cmds: [
+            Command {
+                tokens: [
+                    Token {
+                        lexeme: "echo",
+                        token_type: Word(
+                            Text,
+                        ),
+                        line: 0,
+                        range: (
+                            21,
+                            24,
+                        ),
+                    },
+                    Token {
+                        lexeme: "bar",
+                        token_type: Word(
+                            Text,
+                        ),
+                        line: 0,
+                        range: (
+                            26,
+                            28,
+                        ),
+                    },
+                ],
+                path: "echo",
+                negate_exit_status: false,
+                is_unqualified_path: false,
+            },
+        ],
+        execute_mode: Normal,
+        exit_term: false,
+        operator_for_next_exec: None,
+    },
+]
