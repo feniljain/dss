@@ -21,7 +21,7 @@ expression: results
                 ],
                 path: "ls",
                 negate_exit_status: false,
-                is_unqualified_path: false,
+                is_unqualified_path: true,
             },
         ],
         execute_mode: Normal,

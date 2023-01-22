@@ -32,7 +32,7 @@ expression: results
                 ],
                 path: "./ls",
                 negate_exit_status: false,
-                is_unqualified_path: true,
+                is_unqualified_path: false,
             },
         ],
         execute_mode: Normal,

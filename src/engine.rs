@@ -67,22 +67,12 @@ impl Engine {
                 continue;
             }
 
-            // if input_str.trim() == "exit" {
-            //     break;
-            // }
-
             let mut lexer = Lexer::new(&input_str);
             let tokens = lexer.scan()?;
             let break_term_loop = self.parse_and_execute(tokens)?;
             if break_term_loop {
                 break;
             }
-
-            // let (commands, separators) = Command::parse_input(input_str)?;
-            // let break_term_loop = self.execute_commands_with_separators(commands, separators)?;
-            // if break_term_loop {
-            //     break;
-            // }
         }
 
         Ok(())
@@ -92,11 +82,11 @@ impl Engine {
         let mut parser = Parser::new(tokens, tokens.len());
         while let Some(parse_result) = parser.get_command()? {
             if parse_result.exit_term {
-                // break 'term_loop;
                 return Ok(true);
             }
 
             println!("parse_result: {:?}", parse_result);
+
             match parse_result.execute_mode {
                 ExecuteMode::Normal => {
                     assert_eq!(parse_result.cmds.len(), 1);
@@ -116,7 +106,6 @@ impl Engine {
             // FIXME: Handle this error properly
             self.execution_successful = !self.handle_builtin_command(command).is_err();
         } else {
-            // FIXME:
             self.fork_process_and_execute_cmd(command)?;
         }
 

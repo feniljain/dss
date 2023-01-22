@@ -110,12 +110,12 @@ impl<'a> Parser<'a> {
 
         match cmd_path {
             Some(cmd_path) => {
-                let mut is_unqualified_path = false;
+                let mut is_unqualified_path = true;
                 if cmd_path.starts_with("./")
                     || cmd_path.starts_with("../")
                     || cmd_path.starts_with("/")
                 {
-                    is_unqualified_path = true;
+                    is_unqualified_path = false;
                 }
 
                 let cmd = Command {
