@@ -78,7 +78,7 @@ impl Engine {
         Ok(())
     }
 
-    fn parse_and_execute(&mut self, tokens: &Vec<Token>) -> anyhow::Result<bool> {
+    pub fn parse_and_execute(&mut self, tokens: &Vec<Token>) -> anyhow::Result<bool> {
         let mut parser = Parser::new(tokens, tokens.len());
         while let Some(parse_result) = parser.get_command()? {
             if parse_result.exit_term {
@@ -112,7 +112,7 @@ impl Engine {
         Ok(())
     }
 
-    pub fn fork_process_and_execute_cmd(&mut self, command: Command) -> anyhow::Result<()> {
+    fn fork_process_and_execute_cmd(&mut self, command: Command) -> anyhow::Result<()> {
         match unsafe { fork() } {
             Ok(ForkResult::Parent {
                 child: child_pid, ..
@@ -148,19 +148,12 @@ impl Engine {
 
     // GOTCHA: This currently executes the command and stops the complete program
     // due to libc::exit at the end
-    fn execute_external_cmd(
-        &mut self,
-        command: Command,
-    ) -> anyhow::Result<()> {
+    fn execute_external_cmd(&mut self, command: Command) -> anyhow::Result<()> {
         // FIXME: Optimize this .len() out,
         // we just wanna know if there are more
         // than 1 elements
         let cmd_args = command.get_args();
-        let args: &[CString] = if cmd_args.len() < 1 {
-            &[]
-        } else {
-            &cmd_args
-        };
+        let args: &[CString] = if cmd_args.len() < 1 { &[] } else { &cmd_args };
 
         let mut exit_status = 0;
         let mut errno_opt: Option<Errno> = None;
@@ -266,98 +259,107 @@ fn parse_paths() -> Vec<String> {
         .collect();
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::{super::command::DeprecatedCommand, Engine};
+#[cfg(test)]
+mod tests {
+    use crate::command::lexer::Lexer;
 
-//     // Trying to use `true` and `false` in tests here
-//     // cause they are readily available on UNIX systems
-//     // or are easy to replicate behaviour of too
+    use super::Engine;
 
-//     fn check(input_str: &str) -> Engine {
-//         let mut engine = Engine::new();
+    // Trying to use `true` and `false` in tests here
+    // cause they are readily available on UNIX systems
+    // or are easy to replicate behaviour of too
 
-//         let (commands, separators) = DeprecatedCommand::parse_input(input_str.to_string() + "\n")
-//             .expect("parsing should have succeeded");
+    fn get_tokens(input_str: &str) -> anyhow::Result<Lexer> {
+        let mut lexer = Lexer::new(input_str);
+        lexer.scan()?;
+        Ok(lexer)
+    }
 
-//         // engine
-//         //     .execute_commands_with_separators(commands, separators)
-//         //     .expect("executing should have succeeded");
-//         engine
-//     }
+    fn check(input_str: &str) -> Engine {
+        let mut engine = Engine::new();
 
-//     #[test]
-//     fn test_simple_cmd_execution() {
-//         let engine = check("ls");
-//         assert!(engine.execution_successful);
-//     }
+        let ip_str = input_str.to_string() + "\n";
+        let lexer = get_tokens(&ip_str).expect("lexer failed, check lexer tests");
 
-//     #[test]
-//     fn test_simple_cmd_with_args_execution() {
-//         let engine = check("ls -la");
-//         assert!(engine.execution_successful);
+        engine
+            .parse_and_execute(&lexer.tokens)
+            .expect("expected successful execution");
 
-//         let engine = check("ls -la src/");
-//         assert!(engine.execution_successful);
-//     }
+        engine
+    }
 
-//     #[test]
-//     fn test_cmd_execution_with_semicolon_separator() {
-//         let engine = check("ls -la ; true");
-//         assert!(engine.execution_successful);
+    #[test]
+    fn test_simple_cmd_execution() {
+        let engine = check("ls");
+        assert!(engine.execution_successful);
+    }
 
-//         let engine = check("false ; true");
-//         assert!(engine.execution_successful);
+    #[test]
+    fn test_simple_cmd_with_args_execution() {
+        let engine = check("ls -la");
+        assert!(engine.execution_successful);
 
-//         let engine = check("true ; false");
-//         assert!(!engine.execution_successful);
-//     }
+        let engine = check("ls -la src/");
+        assert!(engine.execution_successful);
+    }
 
-//     #[test]
-//     fn test_cmd_execution_with_logical_or_separator() {
-//         let engine = check("true || true");
-//         assert!(engine.execution_successful);
+    #[test]
+    fn test_cmd_execution_with_semicolon_separator() {
+        let engine = check("ls -la ; true");
+        assert!(engine.execution_successful);
 
-//         let engine = check("false || false");
-//         assert!(!engine.execution_successful);
+        let engine = check("false ; true");
+        assert!(engine.execution_successful);
 
-//         let engine = check("true || false");
-//         assert!(engine.execution_successful);
+        let engine = check("true ; false");
+        assert!(!engine.execution_successful);
+    }
 
-//         let engine = check("false || true");
-//         assert!(engine.execution_successful);
-//     }
+    #[test]
+    fn test_cmd_execution_with_logical_or_separator() {
+        let engine = check("true || true");
+        assert!(engine.execution_successful);
 
-//     #[test]
-//     fn test_cmd_execution_with_logical_and_separator() {
-//         let engine = check("true && true");
-//         assert!(engine.execution_successful);
+        let engine = check("false || false");
+        assert!(!engine.execution_successful);
 
-//         let engine = check("true && true");
-//         assert!(engine.execution_successful);
+        let engine = check("true || false");
+        assert!(engine.execution_successful);
 
-//         let engine = check("true && false");
-//         assert!(!engine.execution_successful);
+        // let engine = check("false || true");
+        // assert!(engine.execution_successful);
+    }
 
-//         let engine = check("false && true");
-//         assert!(!engine.execution_successful);
-//     }
+    #[test]
+    fn test_cmd_execution_with_logical_and_separator() {
+        let engine = check("true && true");
+        assert!(engine.execution_successful);
 
-//     #[test]
-//     fn test_cmd_execution_with_negate_exit_status() {
-//         let engine = check("true && ! false");
-//         assert!(engine.execution_successful);
+        let engine = check("true && true");
+        assert!(engine.execution_successful);
 
-//         let engine = check("true && ! false");
-//         assert!(engine.execution_successful);
+        let engine = check("true && false");
+        assert!(!engine.execution_successful);
 
-//         let engine = check("! false || ! true");
-//         assert!(engine.execution_successful);
+        let engine = check("false && true");
+        assert!(!engine.execution_successful);
+    }
 
-//         let engine = check("! true");
-//         assert!(!engine.execution_successful);
-//     }
-// }
+    #[test]
+    fn test_cmd_execution_with_negate_exit_status() {
+        let engine = check("true && ! false");
+        assert!(engine.execution_successful);
+
+        let engine = check("true && ! false");
+        assert!(engine.execution_successful);
+
+        let engine = check("! false || ! true");
+        assert!(engine.execution_successful);
+
+        let engine = check("! true");
+        assert!(!engine.execution_successful);
+    }
+}
 
 // fn execute_commands_with_separators(
 //     &mut self,
