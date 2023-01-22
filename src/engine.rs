@@ -5,6 +5,7 @@ use nix::{
     unistd::{chdir, execve, fork, ForkResult},
 };
 use signal_hook::consts;
+
 use std::{
     convert::Infallible,
     ffi::{CStr, CString},
@@ -22,7 +23,7 @@ use crate::{
     command::{
         lexer::Lexer,
         parser::{ExecuteMode, Parser},
-        token::Token,
+        token::{Operator, Token},
         Command,
     },
     errors::ShellError,
@@ -80,22 +81,46 @@ impl Engine {
 
     pub fn parse_and_execute(&mut self, tokens: &Vec<Token>) -> anyhow::Result<bool> {
         let mut parser = Parser::new(tokens, tokens.len());
+        let mut separator = None;
         while let Some(parse_result) = parser.get_command()? {
             if parse_result.exit_term {
                 return Ok(true);
             }
 
-            println!("parse_result: {:?}", parse_result);
-
             match parse_result.execute_mode {
                 ExecuteMode::Normal => {
                     assert_eq!(parse_result.cmds.len(), 1);
+
+                    match separator {
+                        Some(Operator::OrIf) => {
+                            if self.execution_successful {
+                                break;
+                            }
+                        }
+                        Some(Operator::AndIf) => {
+                            if !self.execution_successful {
+                                break;
+                            }
+                        }
+                        Some(Operator::Semicolon) => {}
+                        Some(op) => {
+                            return Err(ShellError::InternalError(format!(
+                                "received operator other than separators: {}",
+                                op
+                            ))
+                            .into())
+                        }
+                        None => {}
+                    }
+
                     self.execute_command(parse_result.cmds[0].clone())?;
                 }
                 ExecuteMode::Subshell(tokens) => {
                     return self.parse_and_execute(&tokens);
                 }
             }
+
+            separator = parse_result.operator_for_next_exec;
         }
 
         Ok(false)
@@ -326,8 +351,8 @@ mod tests {
         let engine = check("true || false");
         assert!(engine.execution_successful);
 
-        // let engine = check("false || true");
-        // assert!(engine.execution_successful);
+        let engine = check("false || true");
+        assert!(engine.execution_successful);
     }
 
     #[test]
@@ -360,69 +385,3 @@ mod tests {
         assert!(!engine.execution_successful);
     }
 }
-
-// fn execute_commands_with_separators(
-//     &mut self,
-//     commands: Vec<DeprecatedCommand>,
-//     separators: Vec<Separator>,
-// ) -> anyhow::Result<bool> {
-//     let mut break_term_loop = false;
-
-//     if separators.len() == 0 {
-//         assert!(commands.len() == 1);
-
-//         if commands[0].args_with_cmd[0] == "exit" {
-//             break_term_loop = true;
-//             return Ok(break_term_loop);
-//         }
-
-//         self.execute_command_by_forking(commands[0].clone())?;
-//     } else {
-//         let mut execution_result: Option<(bool, &Separator)> = None;
-//         let n_cmds = commands.len();
-//         commands.iter().enumerate().for_each(|(i, command)| {
-//             if command.args_with_cmd[0] == "exit" {
-//                 break_term_loop = true;
-//                 ControlFlow::Break::<bool>(true);
-//                 return;
-//             }
-
-//             // FIXME: Do not ignore result of execution here
-//             match execution_result {
-//                 Some((last_execution_result, separator)) => {
-//                     match separator {
-//                         Separator::Semicolon => {
-//                             let _ = self.execute_command(command.clone());
-//                         }
-//                         Separator::LogicalOr => {
-//                             if !last_execution_result {
-//                                 let _ = self.execute_command(command.clone());
-//                             }
-//                         }
-//                         Separator::LogicalAnd => {
-//                             if last_execution_result {
-//                                 let _ = self.execute_command(command.clone());
-//                             }
-//                         }
-//                     }
-
-//                     if i < n_cmds - 1 {
-//                         execution_result = Some((self.execution_successful, &separators[i]));
-//                     }
-//                 }
-//                 None => {
-//                     let _ = self.execute_command(command.clone());
-//                     execution_result = Some((self.execution_successful, &separators[i]));
-//                 }
-//             }
-//         });
-
-//         // FIXME: add logic to break the term loop
-//         // if break_term_loop {
-//         //     // break;
-//         //     return Ok(());
-//         // }
-//     }
-
-//     Ok(break_term_loop)
-// }

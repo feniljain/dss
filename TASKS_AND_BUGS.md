@@ -19,7 +19,8 @@
 - [X] write a proper lexer and parser for commands
 - [X] add lexer tests
 - [X] add parser tests
-- [ ] add tests for execution status
+- [X] add tests for execution status
+- [ ] add support for subshell commands
 - [ ] add support for multiline commands
 - [ ] after stage 1 refactor code to have a separate engine and cmd parsing
 

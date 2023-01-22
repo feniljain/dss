@@ -29,6 +29,8 @@ impl Command {
     }
 }
 
+// Old Lexing + Parsing
+
 //#[derive(Default, Clone, Debug)]
 //pub struct DeprecatedCommand {
 //    pub args_with_cmd: Vec<String>,
@@ -387,4 +389,72 @@ impl Command {
 //     //     assert_eq!(commands[1].args_with_cmd[0], "pwd".to_string());
 //     //     assert_eq!(commands[2].args_with_cmd[0], "pwd".to_string());
 //     // }
+// }
+
+// Old execution code excerpt
+
+// fn execute_commands_with_separators(
+//     &mut self,
+//     commands: Vec<DeprecatedCommand>,
+//     separators: Vec<Separator>,
+// ) -> anyhow::Result<bool> {
+//     let mut break_term_loop = false;
+
+//     if separators.len() == 0 {
+//         assert!(commands.len() == 1);
+
+//         if commands[0].args_with_cmd[0] == "exit" {
+//             break_term_loop = true;
+//             return Ok(break_term_loop);
+//         }
+
+//         self.execute_command_by_forking(commands[0].clone())?;
+//     } else {
+//         let mut execution_result: Option<(bool, &Separator)> = None;
+//         let n_cmds = commands.len();
+//         commands.iter().enumerate().for_each(|(i, command)| {
+//             if command.args_with_cmd[0] == "exit" {
+//                 break_term_loop = true;
+//                 ControlFlow::Break::<bool>(true);
+//                 return;
+//             }
+
+//             // FIXME: Do not ignore result of execution here
+//             match execution_result {
+//                 Some((last_execution_result, separator)) => {
+//                     match separator {
+//                         Separator::Semicolon => {
+//                             let _ = self.execute_command(command.clone());
+//                         }
+//                         Separator::LogicalOr => {
+//                             if !last_execution_result {
+//                                 let _ = self.execute_command(command.clone());
+//                             }
+//                         }
+//                         Separator::LogicalAnd => {
+//                             if last_execution_result {
+//                                 let _ = self.execute_command(command.clone());
+//                             }
+//                         }
+//                     }
+
+//                     if i < n_cmds - 1 {
+//                         execution_result = Some((self.execution_successful, &separators[i]));
+//                     }
+//                 }
+//                 None => {
+//                     let _ = self.execute_command(command.clone());
+//                     execution_result = Some((self.execution_successful, &separators[i]));
+//                 }
+//             }
+//         });
+
+//         // FIXME: add logic to break the term loop
+//         // if break_term_loop {
+//         //     // break;
+//         //     return Ok(());
+//         // }
+//     }
+
+//     Ok(break_term_loop)
 // }
