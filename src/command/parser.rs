@@ -97,7 +97,7 @@ impl<'a> Parser<'a> {
                 }
                 TokenType::RightParen => {
                     parse_result.execute_mode = ExecuteMode::Subshell(tokens.clone());
-                    break;
+                    capture_only_tokens = false;
                 }
                 TokenType::Operator(Operator::Or) => unreachable!(),
                 TokenType::Operator(Operator::And) => unreachable!(),
@@ -243,6 +243,10 @@ mod tests {
     #[test]
     fn test_cmd_parsing_of_subshell() {
         let lexer = get_tokens("(ls && exit)\n").expect("lexer failed, check lexer tests");
+        let results = check(&lexer.tokens).expect("parser failed :(");
+        insta::assert_debug_snapshot!(results);
+
+        let lexer = get_tokens("(ls && exit) && ls\n").expect("lexer failed, check lexer tests");
         let results = check(&lexer.tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
