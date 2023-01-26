@@ -5,7 +5,6 @@
 - [X] add / ./ handling
 - [X] correct path parsing and argument parsing according to the `man execve`
 - [ ] add Ctrl-C + Ctrl-D handling
-- [X] pass stage 1 tests
 - [X] parsing all paths
 - [X] trying all paths robustly
 - [X] proper handling for command not found
@@ -20,9 +19,10 @@
 - [X] add lexer tests
 - [X] add parser tests
 - [X] add tests for execution status
+- [X] after stage 1 refactor code to have a separate engine and cmd parsing
 - [ ] add support for subshell commands
 - [ ] add support for multiline commands
-- [ ] after stage 1 refactor code to have a separate engine and cmd parsing
+- [ ] pass stage 1 tests
 
 ## Bonus Tasks:
 
@@ -34,5 +34,5 @@
 # Bugs
 
 - [X] builtin command execution successful handling
-- [ ] builtin command execution error case handling
+- [ ] builtin command execution error case handling and printing
 - [ ] correct signal handling by referencing https://github.com/kkawakam/rustyline

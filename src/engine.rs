@@ -116,7 +116,11 @@ impl Engine {
                     self.execute_command(parse_result.cmds[0].clone())?;
                 }
                 ExecuteMode::Subshell(tokens) => {
-                    return self.parse_and_execute(&tokens);
+                    self.fork_process_and_execute_function(
+                        false,
+                        None,
+                        ExecuteMode::Subshell(tokens),
+                    )?;
                 }
             }
 
@@ -131,97 +135,9 @@ impl Engine {
             // FIXME: Handle this error properly
             self.execution_successful = !self.handle_builtin_command(command).is_err();
         } else {
-            self.fork_process_and_execute_cmd(command)?;
-        }
-
-        Ok(())
-    }
-
-    fn fork_process_and_execute_cmd(&mut self, command: Command) -> anyhow::Result<()> {
-        match unsafe { fork() } {
-            Ok(ForkResult::Parent {
-                child: child_pid, ..
-            }) => {
-                let wait_status = waitpid(child_pid, None).expect(&format!(
-                    "Expected to wait for child with pid: {:?}",
-                    child_pid
-                ));
-                match wait_status {
-                    WaitStatus::Exited(_pid, mut exit_code) => {
-                        // FIXME: Ugly if/else, replace
-                        // with binary operations
-                        if command.negate_exit_status {
-                            if exit_code == 0 {
-                                exit_code = 1;
-                            } else {
-                                exit_code = 0;
-                            }
-                        }
-                        self.execution_successful = exit_code == 0;
-                    }
-                    _ => write_to_shell(&format!("Did not get exited: {:?}", wait_status))?,
-                }
-            }
-            Ok(ForkResult::Child) => {
-                // FIXME: Handle error here
-                self.execute_external_cmd(command)?;
-            }
-            Err(err) => panic!("Fork failed: {err:?}"),
+            self.fork_process_and_execute_function(command.negate_exit_status, Some(command), ExecuteMode::Normal)?;
         }
         Ok(())
-    }
-
-    // GOTCHA: This currently executes the command and stops the complete program
-    // due to libc::exit at the end
-    fn execute_external_cmd(&mut self, command: Command) -> anyhow::Result<()> {
-        // FIXME: Optimize this .len() out,
-        // we just wanna know if there are more
-        // than 1 elements
-        let cmd_args = command.get_args();
-        let args: &[CString] = if cmd_args.len() < 1 { &[] } else { &cmd_args };
-
-        let mut exit_status = 0;
-        let mut errno_opt: Option<Errno> = None;
-        // If command starts with "/" or "./" or "../", do not do PATH appending
-        if command.is_unqualified_path {
-            'env_paths: for env_path_str in &self.env_paths {
-                let mut path = PathBuf::from_str(&env_path_str)
-                    .expect("Could not construct path buf from env_path");
-
-                path.push(command.path.clone());
-
-                match execve_(&path, args) {
-                    // This Ok() break is actually useless
-                    // cause execve() only returns if there's
-                    // an error, otherwise it just stops the
-                    // child and returns the control to
-                    // parent. For more understanding
-                    // read: RETURN VALUES section
-                    // of execve man page
-                    Ok(_) => break 'env_paths,
-                    Err(errno_) => {
-                        errno_opt = Some(errno_);
-                    }
-                }
-            }
-        } else {
-            let result = execve_(&command.path, args);
-            if let Err(errno) = result {
-                errno_opt = Some(errno);
-            }
-        }
-
-        if let Some(errno) = errno_opt {
-            write_error_to_shell(
-                errno,
-                &command.tokens[0].lexeme,
-                command.is_unqualified_path,
-            )?;
-            // FIXME: Pass proper errno here
-            exit_status = 1;
-        }
-
-        unsafe { libc::_exit(exit_status) };
     }
 
     fn handle_builtin_command(&mut self, mut command: Command) -> anyhow::Result<()> {
@@ -251,6 +167,106 @@ impl Engine {
             _ => Err(ShellError::CommandNotFound(cmd_str.to_string()).into()),
         }
     }
+
+    fn fork_process_and_execute_function(
+        &mut self,
+        negate_exit_status: bool,
+        command: Option<Command>,
+        execute_mode: ExecuteMode,
+    ) -> anyhow::Result<bool> {
+        match unsafe { fork() } {
+            Ok(ForkResult::Parent {
+                child: child_pid, ..
+            }) => {
+                let wait_status = waitpid(child_pid, None).expect(&format!(
+                    "Expected to wait for child with pid: {:?}",
+                    child_pid
+                ));
+                match wait_status {
+                    WaitStatus::Exited(_pid, mut exit_code) => {
+                        // FIXME: Ugly if/else, replace
+                        // with binary operations
+                        if negate_exit_status {
+                            if exit_code == 0 {
+                                exit_code = 1;
+                            } else {
+                                exit_code = 0;
+                            }
+                        }
+                        self.execution_successful = exit_code == 0;
+                        return Ok(exit_code == 0);
+                    }
+                    _ => write_to_shell(&format!("Did not get exited: {:?}", wait_status))?,
+                }
+            }
+            Ok(ForkResult::Child) => match execute_mode {
+                ExecuteMode::Normal => {
+                    let command =
+                        command.expect("internal error: should have contained valid command");
+                    execute_external_cmd(command.clone(), self.env_paths.clone())?;
+                }
+                ExecuteMode::Subshell(tokens) => {
+                    self.parse_and_execute(&tokens)?;
+                }
+            },
+            Err(err) => panic!("Fork failed: {err:?}"),
+        }
+
+        Ok(false)
+    }
+}
+
+// GOTCHA: This currently executes the command and stops the complete program
+// due to libc::exit at the end
+fn execute_external_cmd(command: Command, env_paths: Vec<String>) -> anyhow::Result<()> {
+    // FIXME: Optimize this .len() out,
+    // we just wanna know if there are more
+    // than 1 elements
+    let cmd_args = command.get_args();
+    let args: &[CString] = if cmd_args.len() < 1 { &[] } else { &cmd_args };
+
+    let mut exit_status = 0;
+    let mut errno_opt: Option<Errno> = None;
+    // If command starts with "/" or "./" or "../", do not do PATH appending
+    if command.is_unqualified_path {
+        'env_paths: for env_path_str in &env_paths {
+            let mut path = PathBuf::from_str(&env_path_str)
+                .expect("Could not construct path buf from env_path");
+
+            path.push(command.path.clone());
+
+            match execve_(&path, args) {
+                // This Ok() break is actually useless
+                // cause execve() only returns if there's
+                // an error, otherwise it just stops the
+                // child and returns the control to
+                // parent. For more understanding
+                // read: RETURN VALUES section
+                // of execve man page
+                Ok(_) => break 'env_paths,
+                Err(errno_) => {
+                    errno_opt = Some(errno_);
+                }
+            }
+        }
+    } else {
+        let result = execve_(&command.path, args);
+        if let Err(errno) = result {
+            errno_opt = Some(errno);
+        }
+    }
+
+    if let Some(errno) = errno_opt {
+        write_error_to_shell(
+            errno,
+            &command.tokens[0].lexeme,
+            command.is_unqualified_path,
+        )?;
+        // FIXME: Pass proper errno here
+        exit_status = 1;
+    }
+
+    unsafe { libc::_exit(exit_status) };
 }
 
 fn execve_(path: &PathBuf, args: &[CString]) -> nix::Result<Infallible> {
@@ -375,13 +391,27 @@ mod tests {
         let engine = check("true && ! false");
         assert!(engine.execution_successful);
 
-        let engine = check("true && ! false");
-        assert!(engine.execution_successful);
-
         let engine = check("! false || ! true");
         assert!(engine.execution_successful);
 
         let engine = check("! true");
         assert!(!engine.execution_successful);
+    }
+
+    #[test]
+    fn test_cmd_execution_of_subshell_cmds() {
+        let engine = check("(true)");
+        assert!(engine.execution_successful);
+
+        let engine = check("(false)");
+        assert!(!engine.execution_successful);
+
+        // MANUAL: check if pwds get printed correctly
+        let engine = check("(mkdir testdir && cd testdir && pwd) && pwd");
+        assert!(engine.execution_successful);
+
+        // MANUAL: check if this exit does not exit the main shell
+        let engine = check("(mkdir testdir && cd testdir && exit) && pwd");
+        assert!(engine.execution_successful);
     }
 }
