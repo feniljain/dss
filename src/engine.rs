@@ -27,7 +27,7 @@ use crate::{
         Command,
     },
     errors::ShellError,
-    writer::{write_error_to_shell, write_to_shell, write_to_shell_colored, Color},
+    frontend::{write_error_to_shell, write_to_shell, Prompt},
 };
 
 const BUILTIN_COMMANDS: [&str; 2] = ["cd", "exec"];
@@ -53,26 +53,31 @@ impl Engine {
 
         let term = Arc::new(AtomicBool::new(false));
         signal_hook::flag::register(consts::SIGINT, Arc::clone(&term))?;
+
+        let mut prompt = Prompt::new();
         while !term.load(Ordering::Relaxed) {
-            if !self.execution_successful {
-                write_to_shell_colored("$ ", Color::Red)?;
-            } else {
-                write_to_shell_colored("$ ", Color::Green)?;
+            let mut lexer = Lexer::new();
+            while !lexer.complete_processing() {
+                if lexer.tokens.len() > 0 {
+                    prompt.activate_multiline_prompt();
+                }
+
+                prompt.render(self.execution_successful)?;
+
+                let mut input_str = String::new();
+
+                io::stdin().read_line(&mut input_str)?;
+
+                if input_str.trim() == "" {
+                    continue;
+                }
+
+                lexer.scan(&input_str)?;
+
+                prompt.deactivate_multiline_prompt();
             }
 
-            let mut input_str = String::new();
-
-            io::stdin().read_line(&mut input_str)?;
-
-            input_str = input_str.to_string();
-
-            if input_str.trim() == "" {
-                continue;
-            }
-
-            let mut lexer = Lexer::new(&input_str);
-            let tokens = lexer.scan()?;
-            let break_term_loop = self.parse_and_execute(tokens)?;
+            let break_term_loop = self.parse_and_execute(&lexer.tokens)?;
             if break_term_loop {
                 break;
             }
@@ -89,7 +94,6 @@ impl Engine {
                 return Ok(true);
             }
 
-            println!("parse_result: {:?}", parse_result);
             match parse_result.execute_mode {
                 ExecuteMode::Normal => {
                     assert_eq!(parse_result.cmds.len(), 1);
@@ -119,7 +123,7 @@ impl Engine {
                 }
                 ExecuteMode::Subshell(tokens) => {
                     self.in_subshell = true;
-                    self.fork_process_and_execute_function(
+                    self.fork_process_and_execute(
                         false,
                         None,
                         ExecuteMode::Subshell(tokens),
@@ -141,7 +145,7 @@ impl Engine {
         } else if self.in_subshell {
             execute_external_cmd(command, self.env_paths.clone())?;
         } else {
-            self.fork_process_and_execute_function(
+            self.fork_process_and_execute(
                 command.negate_exit_status,
                 Some(command),
                 ExecuteMode::Normal,
@@ -179,7 +183,7 @@ impl Engine {
         }
     }
 
-    fn fork_process_and_execute_function(
+    fn fork_process_and_execute(
         &mut self,
         negate_exit_status: bool,
         command: Option<Command>,
@@ -230,9 +234,6 @@ impl Engine {
 // GOTCHA: This currently executes the command and stops the complete program
 // due to libc::exit at the end
 fn execute_external_cmd(command: Command, env_paths: Vec<String>) -> anyhow::Result<()> {
-    // FIXME: Optimize this .len() out,
-    // we just wanna know if there are more
-    // than 1 elements
     let cmd_args = command.get_args();
     let args: &[CString] = if cmd_args.len() < 1 { &[] } else { &cmd_args };
 
@@ -322,8 +323,8 @@ mod tests {
     // or are easy to replicate behaviour of too
 
     fn get_tokens(input_str: &str) -> anyhow::Result<Lexer> {
-        let mut lexer = Lexer::new(input_str);
-        lexer.scan()?;
+        let mut lexer = Lexer::new();
+        lexer.scan(input_str)?;
         Ok(lexer)
     }
 

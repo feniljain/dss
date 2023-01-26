@@ -1,7 +1,7 @@
 mod command;
 mod engine;
 mod errors;
-mod writer;
+mod frontend;
 
 use engine::Engine;
 

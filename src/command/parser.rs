@@ -99,6 +99,7 @@ impl<'a> Parser<'a> {
                 }
                 TokenType::Operator(Operator::Or) => unreachable!(),
                 TokenType::Operator(Operator::And) => unreachable!(),
+                TokenType::Backslash => {},
             }
         }
 
@@ -176,8 +177,8 @@ mod tests {
     }
 
     fn get_tokens(input_str: &str) -> anyhow::Result<Lexer> {
-        let mut lexer = Lexer::new(input_str);
-        lexer.scan()?;
+        let mut lexer = Lexer::new();
+        lexer.scan(input_str)?;
         Ok(lexer)
     }
 

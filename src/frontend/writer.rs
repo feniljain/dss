@@ -11,6 +11,7 @@ use nix::errno::Errno;
 pub enum Color {
     Green,
     Red,
+    White,
 }
 
 pub fn write_to_shell(output: &str) -> anyhow::Result<()> {
@@ -29,6 +30,7 @@ pub fn write_to_shell_colored(output: &str, color: Color) -> anyhow::Result<()> 
     match color {
         Color::Red => print!("{}", output.red()),
         Color::Green => print!("{}", output.green()),
+        Color::White => print!("{}", output.white()),
     }
 
     io::stdout().flush().expect("flush failed!");

@@ -21,6 +21,7 @@ pub enum TokenType {
     Operator(Operator),
     LeftParen,
     RightParen,
+    Backslash,
 }
 
 impl Display for TokenType {
@@ -30,6 +31,7 @@ impl Display for TokenType {
             TokenType::Operator(op) => op.to_string(),
             TokenType::LeftParen => "(".into(),
             TokenType::RightParen => ")".into(),
+            TokenType::Backslash => "\\".into(),
         };
 
         write!(f, "{}", variant_str)

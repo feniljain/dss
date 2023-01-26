@@ -1,12 +1,9 @@
-use std::str::Chars;
-
 use crate::errors::{LexError, ShellError};
 
 use super::token::{Keyword, Operator, Token, TokenType, Word};
 
-pub struct Lexer<'a> {
+pub struct Lexer {
     pub tokens: Vec<Token>,
-    itr: Chars<'a>,
     ctx: LexingContext,
 }
 
@@ -18,11 +15,10 @@ struct LexingContext {
     word: String,
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(input_str: &'a str) -> Self {
+impl Lexer {
+    pub fn new() -> Self {
         Self {
             tokens: vec![],
-            itr: input_str.chars(),
             ctx: LexingContext {
                 line: 0,
                 offset: 0,
@@ -35,7 +31,8 @@ impl<'a> Lexer<'a> {
     // Tokenization Spec:
     // - URL: https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18_03
     // - SECTION: 2.3 Token Recognition
-    pub fn scan(&mut self) -> anyhow::Result<&Vec<Token>> {
+    pub fn scan(&mut self, input_str: &str) -> anyhow::Result<&Vec<Token>> {
+        assert!(!self.complete_processing());
         // This clone becomes necessary cause otherwise,
         // if we take mutable borrow of this iterator
         // Rust thinks that add_token mutates `self`,
@@ -44,7 +41,15 @@ impl<'a> Lexer<'a> {
         //
         // partial borrows only work in same function,
         // not across function boundaries
-        let mut itr = self.itr.clone();
+        let mut itr = input_str.chars();
+
+        // This case can only occur when
+        // scan is called again while
+        // processing multiline cmds
+        if self.tokens.len() > 0 {
+            self.ctx.line += 1;
+            self.ctx.offset = 0;
+        }
 
         while let Some(ch) = itr.next() {
             match ch {
@@ -103,7 +108,10 @@ impl<'a> Lexer<'a> {
                     self.delimit_word_and_add_token();
                     self.add_token(")", TokenType::RightParen);
                 }
-
+                '\\' => {
+                    self.delimit_word_and_add_token();
+                    self.add_token("\\", TokenType::Backslash);
+                }
                 ' ' => self.delimit_word_and_add_token(),
                 _ => {
                     if is_valid_name_char(ch) {
@@ -189,6 +197,17 @@ impl<'a> Lexer<'a> {
         };
         self.tokens.push(token);
     }
+
+    pub fn complete_processing(&self) -> bool {
+        let last_token_opt = self.tokens.last();
+        match last_token_opt {
+            Some(last_token) => {
+                !matches!(last_token.token_type, TokenType::Operator(_))
+                    && !matches!(last_token.token_type, TokenType::Backslash)
+            }
+            None => false,
+        }
+    }
 }
 
 fn is_valid_name_char(ch: char) -> bool {
@@ -215,10 +234,12 @@ fn is_alpha(ch: char) -> bool {
 mod tests {
     use super::*;
 
-    fn check<'a>(input_str: &'a str) -> Lexer<'a> {
-        let mut lexer = Lexer::new(input_str);
+    fn check(input_strs: Vec<&str>) -> Lexer {
+        let mut lexer = Lexer::new();
 
-        lexer.scan().expect("lexing should have succeeded");
+        for input_str in input_strs {
+            lexer.scan(input_str).expect("lexing should have succeeded");
+        }
 
         lexer
     }
@@ -231,76 +252,82 @@ mod tests {
 
     #[test]
     fn test_simple_cmd_lexing() {
-        let lexer = check("ls\n");
+        let lexer = check(vec!["ls\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 
     #[test]
     fn test_cmd_with_args_lexing() {
-        let lexer = check("ls -la\n");
+        let lexer = check(vec!["ls -la\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 
     #[test]
     fn test_cmd_lexing_of_semicolon_separator() {
-        let lexer = check("ls -la ; echo foo\n");
+        let lexer = check(vec!["ls -la ; echo foo\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
 
-        let lexer = check("ls -la; echo foo\n");
+        let lexer = check(vec!["ls -la; echo foo\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 
     #[test]
     fn test_cmd_lexing_of_logical_or() {
-        let lexer = check("ls -la || echo foo\n");
+        let lexer = check(vec!["ls -la || echo foo\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
 
-        let lexer = check("ls -la|| echo foo\n");
+        let lexer = check(vec!["ls -la|| echo foo\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 
     #[test]
     fn test_cmd_lexing_of_logical_and() {
-        let lexer = check("ls -la && echo foo\n");
+        let lexer = check(vec!["ls -la && echo foo\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
 
-        let lexer = check("ls -la &&echo foo\n");
+        let lexer = check(vec!["ls -la &&echo foo\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 
     #[test]
     fn test_cmd_lexing_with_multiple_separators() {
-        let lexer = check("false && echo foo || echo bar\n");
+        let lexer = check(vec!["false && echo foo || echo bar\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 
     #[test]
     fn test_cmd_lexing_of_negate_exit_status() {
-        let lexer = check("! ls -la && echo foo\n");
+        let lexer = check(vec!["! ls -la && echo foo\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 
     #[test]
     fn test_lexing_of_subshell_cmds() {
-        let lexer = check("(! ls -la)&& echo foo\n");
+        let lexer = check(vec!["(! ls -la)&& echo foo\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 
     #[test]
     fn test_lexing_of_cmd_with_keyword() {
-        let lexer = check("ls -la&& exit\n");
+        let lexer = check(vec!["ls -la&& exit\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 
     #[test]
     fn test_lexing_of_cmd_cd_dot_dot() {
-        let lexer = check("cd ..\n");
+        let lexer = check(vec!["cd ..\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 
     #[test]
     fn test_lexing_of_cmd_with_unqualified_path() {
-        let lexer = check("./ls\n");
+        let lexer = check(vec!["./ls\n"]);
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_backslash() {
+        let lexer = check(vec!["echo \\", "foo\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 }
