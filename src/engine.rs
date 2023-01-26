@@ -16,7 +16,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
-    },
+    }
 };
 
 use crate::{
@@ -32,10 +32,11 @@ use crate::{
 
 const BUILTIN_COMMANDS: [&str; 2] = ["cd", "exec"];
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Engine {
     pub execution_successful: bool,
     pub env_paths: Vec<String>,
+    pub in_subshell: bool,
 }
 
 impl Engine {
@@ -43,6 +44,7 @@ impl Engine {
         Self {
             execution_successful: true,
             env_paths: parse_paths(),
+            in_subshell: false
         }
     }
 
@@ -116,11 +118,13 @@ impl Engine {
                     self.execute_command(parse_result.cmds[0].clone())?;
                 }
                 ExecuteMode::Subshell(tokens) => {
+                    self.in_subshell = true;
                     self.fork_process_and_execute_function(
                         false,
                         None,
                         ExecuteMode::Subshell(tokens),
                     )?;
+                    self.in_subshell = false;
                 }
             }
 
@@ -134,9 +138,12 @@ impl Engine {
         if is_builtin_command(&command.tokens[0].lexeme) {
             // FIXME: Handle this error properly
             self.execution_successful = !self.handle_builtin_command(command).is_err();
+        } else if self.in_subshell {
+            execute_external_cmd(command, self.env_paths.clone())?;
         } else {
             self.fork_process_and_execute_function(command.negate_exit_status, Some(command), ExecuteMode::Normal)?;
         }
+
         Ok(())
     }
 
@@ -410,8 +417,16 @@ mod tests {
         let engine = check("(mkdir testdir && cd testdir && pwd) && pwd");
         assert!(engine.execution_successful);
 
+        // cleanup
+        let engine = check("rm -r testdir");
+        assert!(engine.execution_successful);
+
         // MANUAL: check if this exit does not exit the main shell
         let engine = check("(mkdir testdir && cd testdir && exit) && pwd");
+        assert!(engine.execution_successful);
+
+        // cleanup
+        let engine = check("rm -r testdir");
         assert!(engine.execution_successful);
     }
 }
