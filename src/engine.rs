@@ -16,7 +16,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
-    }
+    },
 };
 
 use crate::{
@@ -44,7 +44,7 @@ impl Engine {
         Self {
             execution_successful: true,
             env_paths: parse_paths(),
-            in_subshell: false
+            in_subshell: false,
         }
     }
 
@@ -82,13 +82,14 @@ impl Engine {
     }
 
     pub fn parse_and_execute(&mut self, tokens: &Vec<Token>) -> anyhow::Result<bool> {
-        let mut parser = Parser::new(tokens, tokens.len());
+        let mut parser = Parser::new(tokens);
         let mut separator = None;
         while let Some(parse_result) = parser.get_command()? {
             if parse_result.exit_term {
                 return Ok(true);
             }
 
+            println!("parse_result: {:?}", parse_result);
             match parse_result.execute_mode {
                 ExecuteMode::Normal => {
                     assert_eq!(parse_result.cmds.len(), 1);
@@ -107,8 +108,7 @@ impl Engine {
                         Some(Operator::Semicolon) => {}
                         Some(op) => {
                             return Err(ShellError::InternalError(format!(
-                                "received operator other than separators: {}",
-                                op
+                                "received operator other than separators: {op}"
                             ))
                             .into())
                         }
@@ -141,7 +141,11 @@ impl Engine {
         } else if self.in_subshell {
             execute_external_cmd(command, self.env_paths.clone())?;
         } else {
-            self.fork_process_and_execute_function(command.negate_exit_status, Some(command), ExecuteMode::Normal)?;
+            self.fork_process_and_execute_function(
+                command.negate_exit_status,
+                Some(command),
+                ExecuteMode::Normal,
+            )?;
         }
 
         Ok(())

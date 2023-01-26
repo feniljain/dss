@@ -10,7 +10,6 @@ use super::{
 #[derive(Debug)]
 pub struct Parser<'a> {
     tokens: &'a Vec<Token>,
-    tokens_len: usize,
     idx: usize,
 }
 
@@ -21,10 +20,9 @@ pub enum ExecuteMode {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(tokens: &'a Vec<Token>, tokens_len: usize) -> Self {
+    pub fn new(tokens: &'a Vec<Token>) -> Self {
         Self {
             tokens,
-            tokens_len,
             idx: 0,
         }
     }
@@ -43,7 +41,7 @@ impl<'a> Parser<'a> {
         let mut negate_exit_status = false;
         let mut capture_only_tokens = false; // This is for subshell mode
 
-        while self.idx < self.tokens_len {
+        while self.idx < self.tokens.len() {
             let token = self.tokens[self.idx].clone();
             self.idx += 1;
 
@@ -168,7 +166,7 @@ mod tests {
     use super::{ParseResult, Parser};
 
     fn check(tokens: &Vec<Token>) -> anyhow::Result<Vec<ParseResult>> {
-        let mut parser = Parser::new(tokens, tokens.len());
+        let mut parser = Parser::new(tokens);
         let mut results = vec![];
         while let Some(parse_result) = parser.get_command()? {
             results.push(parse_result);
