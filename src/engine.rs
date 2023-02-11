@@ -22,8 +22,8 @@ use std::{
 use crate::{
     command::{
         lexer::Lexer,
-        parser::{ExecuteMode, Parser},
-        token::{Operator, Token},
+        parser::{ExecuteMode, Parser, OpType},
+        token::Token,
         Command,
     },
     errors::ShellError,
@@ -99,17 +99,17 @@ impl Engine {
                     assert_eq!(parse_result.cmds.len(), 1);
 
                     match separator {
-                        Some(Operator::OrIf) => {
+                        Some(OpType::OrIf) => {
                             if self.execution_successful {
                                 break;
                             }
                         }
-                        Some(Operator::AndIf) => {
+                        Some(OpType::AndIf) => {
                             if !self.execution_successful {
                                 break;
                             }
                         }
-                        Some(Operator::Semicolon) => {}
+                        Some(OpType::Semicolon) => {}
                         Some(op) => {
                             return Err(ShellError::InternalError(format!(
                                 "received operator other than separators: {op}"

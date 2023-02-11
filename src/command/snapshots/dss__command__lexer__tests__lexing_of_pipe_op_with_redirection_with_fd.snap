@@ -38,7 +38,9 @@ expression: lexer.tokens
     },
     Token {
         lexeme: ">",
-        token_type: RightPointyBracket,
+        token_type: Operator(
+            RightPointyBracket,
+        ),
         line: 0,
         range: (
             7,

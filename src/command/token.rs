@@ -20,8 +20,6 @@ pub enum TokenType {
     Operator(Operator),
     LeftParen, // "("
     RightParen, // ")"
-    LeftPointyBracket,  // "<"
-    RightPointyBracket,  // ">"
     Backslash,
 }
 
@@ -33,8 +31,6 @@ impl Display for TokenType {
             TokenType::LeftParen => "(".into(),
             TokenType::RightParen => ")".into(),
             TokenType::Backslash => "\\".into(),
-            TokenType::LeftPointyBracket => "<".into(),
-            TokenType::RightPointyBracket => ">".into(),
         };
 
         write!(f, "{}", variant_str)
@@ -81,6 +77,8 @@ pub enum Operator {
     OrIf,  // "||"
     Semicolon,  // ";"
     Exclamation,  // "!"
+    LeftPointyBracket,  // "<"
+    RightPointyBracket,  // ">"
 }
 
 impl Display for Operator {
@@ -92,6 +90,8 @@ impl Display for Operator {
             Operator::And => "&",
             Operator::Or => "|",
             Operator::Exclamation => "!",
+            Operator::LeftPointyBracket => "<",
+            Operator::RightPointyBracket => ">",
         };
 
         write!(f, "{}", variant_str)

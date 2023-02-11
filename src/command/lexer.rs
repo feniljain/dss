@@ -114,11 +114,11 @@ impl Lexer {
                 }
                 '<' => {
                     self.delimit_word_and_add_token();
-                    self.add_token("<", TokenType::LeftPointyBracket);
+                    self.add_token("<", TokenType::Operator(Operator::LeftPointyBracket));
                 }
                 '>' => {
                     self.delimit_word_and_add_token();
-                    self.add_token(">", TokenType::RightPointyBracket);
+                    self.add_token(">", TokenType::Operator(Operator::RightPointyBracket));
                 }
                 ' ' => self.delimit_word_and_add_token(),
                 _ => {

@@ -1,4 +1,4 @@
-use std::{path::PathBuf, str::FromStr};
+use std::{fmt::Display, path::PathBuf, str::FromStr};
 
 use crate::errors::ShellError;
 
@@ -14,6 +14,16 @@ pub struct Parser<'a> {
 }
 
 #[derive(Debug)]
+pub enum OpType {
+    RedirectOutput(Option<u32>),
+    RedirectInput(Option<u32>),
+    OrIf,
+    Or,
+    AndIf,
+    Semicolon,
+}
+
+#[derive(Debug)]
 pub enum ExecuteMode {
     Normal,
     Subshell(Vec<Token>),
@@ -21,10 +31,7 @@ pub enum ExecuteMode {
 
 impl<'a> Parser<'a> {
     pub fn new(tokens: &'a Vec<Token>) -> Self {
-        Self {
-            tokens,
-            idx: 0,
-        }
+        Self { tokens, idx: 0 }
     }
 
     pub fn get_command(&mut self) -> anyhow::Result<Option<ParseResult>> {
@@ -68,15 +75,15 @@ impl<'a> Parser<'a> {
                     }
                 },
                 TokenType::Operator(Operator::OrIf) => {
-                    parse_result.operator_for_next_exec = Some(Operator::OrIf);
+                    parse_result.operator_for_next_exec = Some(OpType::OrIf);
                     break;
                 }
                 TokenType::Operator(Operator::AndIf) => {
-                    parse_result.operator_for_next_exec = Some(Operator::AndIf);
+                    parse_result.operator_for_next_exec = Some(OpType::AndIf);
                     break;
                 }
                 TokenType::Operator(Operator::Semicolon) => {
-                    parse_result.operator_for_next_exec = Some(Operator::Semicolon);
+                    parse_result.operator_for_next_exec = Some(OpType::Semicolon);
                     break;
                 }
                 TokenType::Operator(Operator::Exclamation) => {
@@ -90,6 +97,31 @@ impl<'a> Parser<'a> {
                     }
                     negate_exit_status = true;
                 }
+                TokenType::Operator(Operator::LeftPointyBracket) => {
+                    if let Some(last_token) = tokens.last() {
+                        if let Ok(fd) = last_token.to_string().parse::<u32>() {
+                            tokens.pop();
+                            parse_result.operator_for_next_exec =
+                                Some(OpType::RedirectInput(Some(fd)));
+                        } else {
+                            parse_result.operator_for_next_exec = Some(OpType::RedirectInput(None));
+                        }
+                    }
+                    break;
+                }
+                TokenType::Operator(Operator::RightPointyBracket) => {
+                    if let Some(last_token) = tokens.last() {
+                        if let Ok(fd) = last_token.to_string().parse::<u32>() {
+                            tokens.pop();
+                            parse_result.operator_for_next_exec =
+                                Some(OpType::RedirectOutput(Some(fd)));
+                        } else {
+                            parse_result.operator_for_next_exec =
+                                Some(OpType::RedirectOutput(None));
+                        }
+                    }
+                    break;
+                }
                 TokenType::LeftParen => {
                     capture_only_tokens = true;
                 }
@@ -98,13 +130,11 @@ impl<'a> Parser<'a> {
                     capture_only_tokens = false;
                 }
                 TokenType::Operator(Operator::Or) => {
-                    parse_result.operator_for_next_exec = Some(Operator::Or);
+                    parse_result.operator_for_next_exec = Some(OpType::Or);
                     break;
-                },
+                }
                 TokenType::Operator(Operator::And) => unreachable!(),
-                TokenType::Backslash => {},
-                TokenType::LeftPointyBracket => todo!(),
-                TokenType::RightPointyBracket => todo!(),
+                TokenType::Backslash => {}
             }
         }
 
@@ -151,7 +181,7 @@ pub struct ParseResult {
     pub cmds: Vec<Command>,
     pub execute_mode: ExecuteMode,
     pub exit_term: bool,
-    pub operator_for_next_exec: Option<Operator>,
+    pub operator_for_next_exec: Option<OpType>,
 }
 
 impl ParseResult {
@@ -162,6 +192,29 @@ impl ParseResult {
             exit_term: false,
             operator_for_next_exec: None,
         }
+    }
+}
+
+impl Display for OpType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let variant_str = match self {
+            OpType::AndIf => "&&".into(),
+            OpType::OrIf => "||".into(),
+            OpType::Semicolon => ";".into(),
+            // OpType::And => "&".into(),
+            OpType::Or => "|".into(),
+            // OpType::Exclamation => "!".into(),
+            OpType::RedirectOutput(fd_opt) => match fd_opt {
+                Some(fd) => format!("{}, <", fd),
+                None => "<".into(),
+            },
+            OpType::RedirectInput(fd_opt) => match fd_opt {
+                Some(fd) => format!("{}, >", fd),
+                None => ">".into(),
+            },
+        };
+
+        write!(f, "{}", variant_str)
     }
 }
 
@@ -258,6 +311,20 @@ mod tests {
     #[test]
     fn test_cmd_parsing_of_pipe_ops() {
         let lexer = get_tokens("echo foo | cat | cat\n").expect("lexer failed, check lexer tests");
+        let results = check(&lexer.tokens).expect("parser failed :(");
+        insta::assert_debug_snapshot!(results);
+    }
+
+    #[test]
+    fn test_cmd_parsing_of_redirection_ops_with_fd() {
+        let lexer = get_tokens("ls -6 2> file.txt\n").expect("lexer failed, check lexer tests");
+        let results = check(&lexer.tokens).expect("parser failed :(");
+        insta::assert_debug_snapshot!(results);
+    }
+
+    #[test]
+    fn test_cmd_parsing_of_redirection_ops_without_fd() {
+        let lexer = get_tokens("ls -6> file.txt\n").expect("lexer failed, check lexer tests");
         let results = check(&lexer.tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
