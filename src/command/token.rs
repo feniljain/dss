@@ -5,8 +5,7 @@ pub struct Token {
     pub lexeme: String,
     pub token_type: TokenType,
     pub line: usize,
-    // (start, end)
-    pub range: (usize, usize),
+    pub range: (usize, usize), // (start, end)
 }
 
 impl Display for Token {
@@ -19,8 +18,10 @@ impl Display for Token {
 pub enum TokenType {
     Word(Word),
     Operator(Operator),
-    LeftParen,
-    RightParen,
+    LeftParen, // "("
+    RightParen, // ")"
+    LeftPointyBracket,  // "<"
+    RightPointyBracket,  // ">"
     Backslash,
 }
 
@@ -32,6 +33,8 @@ impl Display for TokenType {
             TokenType::LeftParen => "(".into(),
             TokenType::RightParen => ")".into(),
             TokenType::Backslash => "\\".into(),
+            TokenType::LeftPointyBracket => "<".into(),
+            TokenType::RightPointyBracket => ">".into(),
         };
 
         write!(f, "{}", variant_str)

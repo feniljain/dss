@@ -41,7 +41,7 @@ impl Lexer {
         //
         // partial borrows only work in same function,
         // not across function boundaries
-        let mut itr = input_str.chars();
+        let mut itr = input_str.chars().peekable();
 
         // This case can only occur when
         // scan is called again while
@@ -112,6 +112,14 @@ impl Lexer {
                     self.delimit_word_and_add_token();
                     self.add_token("\\", TokenType::Backslash);
                 }
+                '<' => {
+                    self.delimit_word_and_add_token();
+                    self.add_token("<", TokenType::LeftPointyBracket);
+                }
+                '>' => {
+                    self.delimit_word_and_add_token();
+                    self.add_token(">", TokenType::RightPointyBracket);
+                }
                 ' ' => self.delimit_word_and_add_token(),
                 _ => {
                     if is_valid_name_char(ch) {
@@ -174,6 +182,11 @@ impl Lexer {
                 start_offset -= len;
                 end_offset -= 1;
             }
+            // TokenType::LeftPointyBracket(fd_opt) | TokenType::RightPointyBracket(fd_opt) => {
+            //     if let Some(fd) = fd_opt {
+            //         start_offset -= fd.to_string().len();
+            //     }
+            // }
             _ => {
                 // For other tokens, we evaluated them
                 // as soon we find them, we do not wait to
@@ -183,7 +196,7 @@ impl Lexer {
                 //  ^
                 //  offset point received
                 //
-                //  This is the reason we the space till
+                //  This is the reason we take the space till
                 //  len - 1
                 start_offset -= len - 1;
             }
@@ -328,6 +341,24 @@ mod tests {
     #[test]
     fn test_lexing_of_backslash() {
         let lexer = check(vec!["echo \\", "foo\n"]);
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_pipe_op() {
+        let lexer = check(vec!["echo foo | cat | cat\n"]);
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_pipe_op_with_redirection_with_fd() {
+        let lexer = check(vec!["ls -6 2> file.txt\n"]);
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_pipe_op_with_redirection_without_fd() {
+        let lexer = check(vec!["ls -6> file.txt\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 }

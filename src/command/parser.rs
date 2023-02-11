@@ -97,9 +97,14 @@ impl<'a> Parser<'a> {
                     parse_result.execute_mode = ExecuteMode::Subshell(tokens.clone());
                     capture_only_tokens = false;
                 }
-                TokenType::Operator(Operator::Or) => unreachable!(),
+                TokenType::Operator(Operator::Or) => {
+                    parse_result.operator_for_next_exec = Some(Operator::Or);
+                    break;
+                },
                 TokenType::Operator(Operator::And) => unreachable!(),
                 TokenType::Backslash => {},
+                TokenType::LeftPointyBracket => todo!(),
+                TokenType::RightPointyBracket => todo!(),
             }
         }
 
@@ -246,6 +251,13 @@ mod tests {
         insta::assert_debug_snapshot!(results);
 
         let lexer = get_tokens("(ls && exit) && ls\n").expect("lexer failed, check lexer tests");
+        let results = check(&lexer.tokens).expect("parser failed :(");
+        insta::assert_debug_snapshot!(results);
+    }
+
+    #[test]
+    fn test_cmd_parsing_of_pipe_ops() {
+        let lexer = get_tokens("echo foo | cat | cat\n").expect("lexer failed, check lexer tests");
         let results = check(&lexer.tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }

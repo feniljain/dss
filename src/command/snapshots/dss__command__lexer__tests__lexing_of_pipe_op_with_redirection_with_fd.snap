@@ -1,0 +1,59 @@
+---
+source: src/command/lexer.rs
+expression: lexer.tokens
+---
+[
+    Token {
+        lexeme: "ls",
+        token_type: Word(
+            Text,
+        ),
+        line: 0,
+        range: (
+            0,
+            1,
+        ),
+    },
+    Token {
+        lexeme: "-6",
+        token_type: Word(
+            Text,
+        ),
+        line: 0,
+        range: (
+            3,
+            4,
+        ),
+    },
+    Token {
+        lexeme: "2",
+        token_type: Word(
+            Text,
+        ),
+        line: 0,
+        range: (
+            6,
+            6,
+        ),
+    },
+    Token {
+        lexeme: ">",
+        token_type: RightPointyBracket,
+        line: 0,
+        range: (
+            7,
+            7,
+        ),
+    },
+    Token {
+        lexeme: "file.txt",
+        token_type: Word(
+            Text,
+        ),
+        line: 0,
+        range: (
+            9,
+            16,
+        ),
+    },
+]
