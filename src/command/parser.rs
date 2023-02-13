@@ -75,15 +75,15 @@ impl<'a> Parser<'a> {
                     }
                 },
                 TokenType::Operator(Operator::OrIf) => {
-                    parse_result.operator_for_next_exec = Some(OpType::OrIf);
+                    parse_result.associated_operator = Some(OpType::OrIf);
                     break;
                 }
                 TokenType::Operator(Operator::AndIf) => {
-                    parse_result.operator_for_next_exec = Some(OpType::AndIf);
+                    parse_result.associated_operator = Some(OpType::AndIf);
                     break;
                 }
                 TokenType::Operator(Operator::Semicolon) => {
-                    parse_result.operator_for_next_exec = Some(OpType::Semicolon);
+                    parse_result.associated_operator = Some(OpType::Semicolon);
                     break;
                 }
                 TokenType::Operator(Operator::Exclamation) => {
@@ -102,10 +102,10 @@ impl<'a> Parser<'a> {
                     if let Some(last_token) = tokens.last() {
                         if let Ok(fd) = last_token.to_string().parse::<i32>() {
                             tokens.pop();
-                            parse_result.operator_for_next_exec =
+                            parse_result.associated_operator =
                                 Some(OpType::RedirectInput(Some(fd)));
                         } else {
-                            parse_result.operator_for_next_exec = Some(OpType::RedirectInput(None));
+                            parse_result.associated_operator = Some(OpType::RedirectInput(None));
                         }
                     }
                     break;
@@ -114,10 +114,10 @@ impl<'a> Parser<'a> {
                     if let Some(last_token) = tokens.last() {
                         if let Ok(fd) = last_token.to_string().parse::<i32>() {
                             tokens.pop();
-                            parse_result.operator_for_next_exec =
+                            parse_result.associated_operator =
                                 Some(OpType::RedirectOutput(Some(fd)));
                         } else {
-                            parse_result.operator_for_next_exec =
+                            parse_result.associated_operator =
                                 Some(OpType::RedirectOutput(None));
                         }
                     }
@@ -131,7 +131,7 @@ impl<'a> Parser<'a> {
                     capture_only_tokens = false;
                 }
                 TokenType::Operator(Operator::Or) => {
-                    parse_result.operator_for_next_exec = Some(OpType::Or);
+                    parse_result.associated_operator = Some(OpType::Or);
                     break;
                 }
                 TokenType::Operator(Operator::And) => unreachable!(),
@@ -182,7 +182,7 @@ pub struct ParseResult {
     pub cmds: Vec<Command>,
     pub execute_mode: ExecuteMode,
     pub exit_term: bool,
-    pub operator_for_next_exec: Option<OpType>,
+    pub associated_operator: Option<OpType>,
 }
 
 impl ParseResult {
@@ -191,7 +191,7 @@ impl ParseResult {
             cmds: vec![],
             execute_mode: ExecuteMode::Normal,
             exit_term: false,
-            operator_for_next_exec: None,
+            associated_operator: None,
         }
     }
 }

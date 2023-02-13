@@ -115,7 +115,7 @@ impl Engine {
 
                     // Operators which needs addressing current execution cycle
                     // ( that's why we operate on currernt operator here )
-                    match parse_result.operator_for_next_exec {
+                    match parse_result.associated_operator {
                         Some(OpType::RedirectOutput(_fd)) => {}
                         Some(OpType::RedirectInput(_fd)) => {}
                         Some(OpType::Or) => {
@@ -152,7 +152,7 @@ impl Engine {
                 }
             }
 
-            last_operator = parse_result.operator_for_next_exec;
+            last_operator = parse_result.associated_operator;
             self.reset_stdin_out_fds();
         }
 
