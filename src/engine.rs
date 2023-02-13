@@ -2,7 +2,7 @@ use libc::getenv;
 use nix::{
     errno::Errno,
     sys::wait::{waitpid, WaitStatus},
-    unistd::{chdir, execve, fork, ForkResult},
+    unistd::{chdir, close, dup2, execve, fork, pipe, ForkResult},
 };
 use signal_hook::consts;
 
@@ -22,7 +22,7 @@ use std::{
 use crate::{
     command::{
         lexer::Lexer,
-        parser::{ExecuteMode, Parser, OpType},
+        parser::{ExecuteMode, OpType, Parser},
         token::Token,
         Command,
     },
@@ -37,6 +37,8 @@ pub struct Engine {
     pub execution_successful: bool,
     pub env_paths: Vec<String>,
     pub in_subshell: bool,
+    pub set_stdin_to: i32,
+    pub set_stdout_to: i32,
 }
 
 impl Engine {
@@ -45,6 +47,8 @@ impl Engine {
             execution_successful: true,
             env_paths: parse_paths(),
             in_subshell: false,
+            set_stdin_to: 0,
+            set_stdout_to: 1,
         }
     }
 
@@ -88,7 +92,9 @@ impl Engine {
 
     pub fn parse_and_execute(&mut self, tokens: &Vec<Token>) -> anyhow::Result<bool> {
         let mut parser = Parser::new(tokens);
-        let mut separator = None;
+        let mut last_operator = None;
+        let mut set_stdin_to = None;
+
         while let Some(parse_result) = parser.get_command()? {
             if parse_result.exit_term {
                 return Ok(true);
@@ -96,9 +102,33 @@ impl Engine {
 
             match parse_result.execute_mode {
                 ExecuteMode::Normal => {
+                    // Currently trying to follow a philosophy of only executing
+                    // one command at a time
                     assert_eq!(parse_result.cmds.len(), 1);
 
-                    match separator {
+                    // Read fd from previous pipe operation
+                    // to set curr stdin
+                    if let Some(fd) = set_stdin_to {
+                        self.set_stdin_to = fd;
+                    }
+                    set_stdin_to = None;
+
+                    // Operators which needs addressing current execution cycle
+                    // ( that's why we operate on currernt operator here )
+                    match parse_result.operator_for_next_exec {
+                        Some(OpType::RedirectOutput(_fd)) => {}
+                        Some(OpType::RedirectInput(_fd)) => {}
+                        Some(OpType::Or) => {
+                            let (fd0, fd1) = pipe()?;
+                            set_stdin_to = Some(fd0);
+                            self.set_stdout_to = fd1;
+                        }
+                        _ => {}
+                    }
+
+                    // Operators which needs addressing next execution cycle
+                    // ( that's why we operate on last operator here )
+                    match last_operator {
                         Some(OpType::OrIf) => {
                             if self.execution_successful {
                                 break;
@@ -110,32 +140,28 @@ impl Engine {
                             }
                         }
                         Some(OpType::Semicolon) => {}
-                        Some(op) => {
-                            return Err(ShellError::InternalError(format!(
-                                "received operator other than separators: {op}"
-                            ))
-                            .into())
-                        }
-                        None => {}
+                        _ => {}
                     }
 
                     self.execute_command(parse_result.cmds[0].clone())?;
                 }
                 ExecuteMode::Subshell(tokens) => {
                     self.in_subshell = true;
-                    self.fork_process_and_execute(
-                        false,
-                        None,
-                        ExecuteMode::Subshell(tokens),
-                    )?;
+                    self.fork_process_and_execute(false, None, ExecuteMode::Subshell(tokens))?;
                     self.in_subshell = false;
                 }
             }
 
-            separator = parse_result.operator_for_next_exec;
+            last_operator = parse_result.operator_for_next_exec;
+            self.reset_stdin_out_fds();
         }
 
         Ok(false)
+    }
+
+    fn reset_stdin_out_fds(&mut self) {
+        self.set_stdin_to = 0;
+        self.set_stdout_to = 1;
     }
 
     fn execute_command(&mut self, command: Command) -> anyhow::Result<()> {
@@ -193,6 +219,11 @@ impl Engine {
             Ok(ForkResult::Parent {
                 child: child_pid, ..
             }) => {
+                // This fd is not needed in parent anymore,
+                // child will write to it
+                if self.set_stdout_to != 1 {
+                    close(self.set_stdout_to)?;
+                }
                 let wait_status = waitpid(child_pid, None).expect(&format!(
                     "Expected to wait for child with pid: {:?}",
                     child_pid
@@ -216,6 +247,18 @@ impl Engine {
             }
             Ok(ForkResult::Child) => match execute_mode {
                 ExecuteMode::Normal => {
+                    // Only change file descriptors of stdin
+                    // and stdout if they are different from
+                    // standard ones
+                    if self.set_stdin_to != 0 {
+                        dup2(self.set_stdin_to, 0)?;
+                        close(self.set_stdin_to)?;
+                    }
+                    if self.set_stdout_to != 1 {
+                        dup2(self.set_stdout_to, 1)?;
+                        close(self.set_stdout_to)?;
+                    }
+
                     let command =
                         command.expect("internal error: should have contained valid command");
                     execute_external_cmd(command.clone(), self.env_paths.clone())?;
@@ -432,6 +475,12 @@ mod tests {
 
         // cleanup
         let engine = check("rm -r testdir");
+        assert!(engine.execution_successful);
+    }
+
+    #[test]
+    fn test_cmd_execution_of_piped_cmds() {
+        let engine = check("ls | grep c");
         assert!(engine.execution_successful);
     }
 }

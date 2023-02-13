@@ -9,7 +9,7 @@ edition = "2021"
 anyhow = "1.0.68"
 colored = "2.0.0"
 libc = "0.2.139"
-nix = "0.26.1"
+nix = { version = "0.26.1", features = ["fs"] }
 signal-hook = "0.3.14"
 thiserror = "1.0.38"
 

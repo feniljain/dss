@@ -1,0 +1,4 @@
+- https://github.com/tokenrove/build-your-own-shell/
+- https://indradhanush.github.io/blog/writing-a-unix-shell-part-1/
+- https://stackoverflow.com/questions/8082932/connecting-n-commands-with-pipes-in-a-shell
+- 0 = stdin, 1 = stdout, stderr = 2

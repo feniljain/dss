@@ -116,6 +116,7 @@ impl Lexer {
                     self.delimit_word_and_add_token();
                     self.add_token("<", TokenType::Operator(Operator::LeftPointyBracket));
                 }
+                // FIXME: Add support for `>>`
                 '>' => {
                     self.delimit_word_and_add_token();
                     self.add_token(">", TokenType::Operator(Operator::RightPointyBracket));
@@ -228,7 +229,7 @@ fn is_valid_name_char(ch: char) -> bool {
 }
 
 fn is_valid_name_special_char(ch: char) -> bool {
-    ch == '_' || ch == '-' || ch == '.' || ch == '/'
+    ch == '_' || ch == '-' || ch == '.' || ch == '/' || ch == '"' || ch == '$' || ch == '{' || ch == '}'
 }
 
 fn is_alpha_numeric(ch: char) -> bool {

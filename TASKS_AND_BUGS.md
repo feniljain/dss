@@ -36,3 +36,4 @@
 - [X] builtin command execution successful handling
 - [ ] builtin command execution error case handling and printing
 - [ ] correct signal handling by referencing https://github.com/kkawakam/rustyline
+- [ ] correct handling of "" and {} in commands like `grep "c"` or `awk {print $9}`

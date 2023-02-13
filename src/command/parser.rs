@@ -15,8 +15,8 @@ pub struct Parser<'a> {
 
 #[derive(Debug)]
 pub enum OpType {
-    RedirectOutput(Option<u32>),
-    RedirectInput(Option<u32>),
+    RedirectOutput(Option<i32>),
+    RedirectInput(Option<i32>),
     OrIf,
     Or,
     AndIf,
@@ -97,9 +97,10 @@ impl<'a> Parser<'a> {
                     }
                     negate_exit_status = true;
                 }
+                // FIXME: Add support for `>>`, `<>`
                 TokenType::Operator(Operator::LeftPointyBracket) => {
                     if let Some(last_token) = tokens.last() {
-                        if let Ok(fd) = last_token.to_string().parse::<u32>() {
+                        if let Ok(fd) = last_token.to_string().parse::<i32>() {
                             tokens.pop();
                             parse_result.operator_for_next_exec =
                                 Some(OpType::RedirectInput(Some(fd)));
@@ -111,7 +112,7 @@ impl<'a> Parser<'a> {
                 }
                 TokenType::Operator(Operator::RightPointyBracket) => {
                     if let Some(last_token) = tokens.last() {
-                        if let Ok(fd) = last_token.to_string().parse::<u32>() {
+                        if let Ok(fd) = last_token.to_string().parse::<i32>() {
                             tokens.pop();
                             parse_result.operator_for_next_exec =
                                 Some(OpType::RedirectOutput(Some(fd)));
