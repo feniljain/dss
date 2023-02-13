@@ -36,9 +36,16 @@ const BUILTIN_COMMANDS: [&str; 2] = ["cd", "exec"];
 pub struct Engine {
     pub execution_successful: bool,
     pub env_paths: Vec<String>,
-    pub in_subshell: bool,
     pub set_stdin_to: i32,
     pub set_stdout_to: i32,
+    execution_mode: ExecutionMode,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum ExecutionMode {
+    Normal,
+    Subshell,
+    Pipeline,
 }
 
 impl Engine {
@@ -46,7 +53,7 @@ impl Engine {
         Self {
             execution_successful: true,
             env_paths: parse_paths(),
-            in_subshell: false,
+            execution_mode: ExecutionMode::Normal,
             set_stdin_to: 0,
             set_stdout_to: 1,
         }
@@ -102,6 +109,7 @@ impl Engine {
 
             match parse_result.execute_mode {
                 ExecuteMode::Normal => {
+                    self.execution_mode = ExecutionMode::Normal;
                     // Currently trying to follow a philosophy of only executing
                     // one command at a time
                     assert_eq!(parse_result.cmds.len(), 1);
@@ -122,6 +130,7 @@ impl Engine {
                             let (fd0, fd1) = pipe()?;
                             set_stdin_to = Some(fd0);
                             self.set_stdout_to = fd1;
+                            self.execution_mode = ExecutionMode::Pipeline;
                         }
                         _ => {}
                     }
@@ -146,9 +155,8 @@ impl Engine {
                     self.execute_command(parse_result.cmds[0].clone())?;
                 }
                 ExecuteMode::Subshell(tokens) => {
-                    self.in_subshell = true;
+                    self.execution_mode = ExecutionMode::Subshell;
                     self.fork_process_and_execute(false, None, ExecuteMode::Subshell(tokens))?;
-                    self.in_subshell = false;
                 }
             }
 
@@ -168,7 +176,7 @@ impl Engine {
         if is_builtin_command(&command.tokens[0].lexeme) {
             // FIXME: Handle this error properly
             self.execution_successful = !self.handle_builtin_command(command).is_err();
-        } else if self.in_subshell {
+        } else if matches!(self.execution_mode, ExecutionMode::Subshell) {
             execute_external_cmd(command, self.env_paths.clone())?;
         } else {
             self.fork_process_and_execute(
@@ -224,25 +232,33 @@ impl Engine {
                 if self.set_stdout_to != 1 {
                     close(self.set_stdout_to)?;
                 }
-                let wait_status = waitpid(child_pid, None).expect(&format!(
-                    "Expected to wait for child with pid: {:?}",
-                    child_pid
-                ));
-                match wait_status {
-                    WaitStatus::Exited(_pid, mut exit_code) => {
-                        // FIXME: Ugly if/else, replace
-                        // with binary operations
-                        if negate_exit_status {
-                            if exit_code == 0 {
-                                exit_code = 1;
-                            } else {
-                                exit_code = 0;
+
+                // We do not wait for forked children if the command is
+                // running in pipeline mode
+                //
+                // Note: last command in the pipeline is the only one
+                // we wait for
+                if !matches!(self.execution_mode, ExecutionMode::Pipeline) {
+                    let wait_status = waitpid(child_pid, None).expect(&format!(
+                        "Expected to wait for child with pid: {:?}",
+                        child_pid
+                    ));
+                    match wait_status {
+                        WaitStatus::Exited(_pid, mut exit_code) => {
+                            // FIXME: Ugly if/else, replace
+                            // with binary operations
+                            if negate_exit_status {
+                                if exit_code == 0 {
+                                    exit_code = 1;
+                                } else {
+                                    exit_code = 0;
+                                }
                             }
+                            self.execution_successful = exit_code == 0;
+                            return Ok(exit_code == 0);
                         }
-                        self.execution_successful = exit_code == 0;
-                        return Ok(exit_code == 0);
+                        _ => write_to_shell(&format!("Did not get exited: {:?}", wait_status))?,
                     }
-                    _ => write_to_shell(&format!("Did not get exited: {:?}", wait_status))?,
                 }
             }
             Ok(ForkResult::Child) => match execute_mode {
