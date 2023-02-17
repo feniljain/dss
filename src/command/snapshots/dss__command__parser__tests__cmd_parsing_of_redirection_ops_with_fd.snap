@@ -34,19 +34,6 @@ expression: results
                 negate_exit_status: false,
                 is_unqualified_path: true,
             },
-        ],
-        execute_mode: Normal,
-        exit_term: false,
-        operator_for_next_exec: Some(
-            RedirectOutput(
-                Some(
-                    2,
-                ),
-            ),
-        ),
-    },
-    ParseResult {
-        cmds: [
             Command {
                 tokens: [
                     Token {
@@ -68,6 +55,12 @@ expression: results
         ],
         execute_mode: Normal,
         exit_term: false,
-        operator_for_next_exec: None,
+        associated_operator: Some(
+            RedirectOutput(
+                Some(
+                    2,
+                ),
+            ),
+        ),
     },
 ]

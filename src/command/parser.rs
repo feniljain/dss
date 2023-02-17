@@ -34,6 +34,16 @@ impl<'a> Parser<'a> {
         Self { tokens, idx: 0 }
     }
 
+    // There are two types of parsing modes:
+    // - First, breaking on separators( i.e. &&, ||, etc ).
+    // These ones return ls && echo as:
+    //  - ls &&
+    //  - echo
+    // - Second, preemptively taking one argument in cases
+    // like redirection, cause we can be sure over there that
+    // there will only be one path/token after redirection
+    // operator, so a command like: ls > file2
+    // will be returned in parse_result as ls > file2 together
     pub fn get_command(&mut self) -> anyhow::Result<Option<ParseResult>> {
         if self.idx >= self.tokens.len() {
             // all commands are done
@@ -108,7 +118,17 @@ impl<'a> Parser<'a> {
                             parse_result.associated_operator = Some(OpType::RedirectInput(None));
                         }
                     }
-                    break;
+
+                    let (cmd, file_path_cmd) = self.handle_point_bracket_cmd_gen(
+                        tokens,
+                        cmd_path.expect("expected command path to exist"),
+                        negate_exit_status,
+                    );
+
+                    parse_result.cmds.push(cmd);
+                    parse_result.cmds.push(file_path_cmd);
+
+                    return Ok(Some(parse_result));
                 }
                 TokenType::Operator(Operator::RightPointyBracket) => {
                     if let Some(last_token) = tokens.last() {
@@ -117,11 +137,20 @@ impl<'a> Parser<'a> {
                             parse_result.associated_operator =
                                 Some(OpType::RedirectOutput(Some(fd)));
                         } else {
-                            parse_result.associated_operator =
-                                Some(OpType::RedirectOutput(None));
+                            parse_result.associated_operator = Some(OpType::RedirectOutput(None));
                         }
                     }
-                    break;
+
+                    let (cmd, file_path_cmd) = self.handle_point_bracket_cmd_gen(
+                        tokens,
+                        cmd_path.expect("expected command path to exist"),
+                        negate_exit_status,
+                    );
+
+                    parse_result.cmds.push(cmd);
+                    parse_result.cmds.push(file_path_cmd);
+
+                    return Ok(Some(parse_result));
                 }
                 TokenType::LeftParen => {
                     capture_only_tokens = true;
@@ -145,20 +174,7 @@ impl<'a> Parser<'a> {
 
         match cmd_path {
             Some(cmd_path) => {
-                let mut is_unqualified_path = true;
-                if cmd_path.starts_with("./")
-                    || cmd_path.starts_with("../")
-                    || cmd_path.starts_with("/")
-                {
-                    is_unqualified_path = false;
-                }
-
-                let cmd = Command {
-                    tokens,
-                    path: cmd_path,
-                    negate_exit_status,
-                    is_unqualified_path,
-                };
+                let cmd = make_command(tokens, cmd_path, negate_exit_status);
 
                 parse_result.cmds.push(cmd);
 
@@ -173,6 +189,43 @@ impl<'a> Parser<'a> {
             }
         }
     }
+
+    fn handle_point_bracket_cmd_gen(
+        &mut self,
+        tokens: Vec<Token>,
+        cmd_path: PathBuf,
+        negate_exit_status: bool,
+    ) -> (Command, Command) {
+        // Construct command before redirect operator
+        let cmd = make_command(tokens, cmd_path, negate_exit_status);
+
+        // Construct command after redirect operator
+        let file_path_token = self.tokens[self.idx].clone();
+        self.idx += 1;
+
+        let file_path = PathBuf::from_str(&file_path_token.lexeme).expect(&format!(
+            "Could not construct path buf from token: {}",
+            file_path_token.lexeme
+        ));
+
+        let file_path_cmd = make_command(vec![file_path_token], file_path, false);
+
+        return (cmd, file_path_cmd);
+    }
+}
+
+fn make_command(tokens: Vec<Token>, cmd_path: PathBuf, negate_exit_status: bool) -> Command {
+    let mut is_unqualified_path = true;
+    if cmd_path.starts_with("./") || cmd_path.starts_with("../") || cmd_path.starts_with("/") {
+        is_unqualified_path = false;
+    }
+
+    return Command {
+        tokens,
+        path: cmd_path,
+        negate_exit_status,
+        is_unqualified_path,
+    };
 }
 
 #[derive(Debug)]

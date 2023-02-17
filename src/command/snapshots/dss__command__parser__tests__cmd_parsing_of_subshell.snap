@@ -45,6 +45,6 @@ expression: results
             ],
         ),
         exit_term: false,
-        operator_for_next_exec: None,
+        associated_operator: None,
     },
 ]

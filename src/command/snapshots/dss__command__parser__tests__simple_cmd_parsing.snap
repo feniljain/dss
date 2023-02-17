@@ -26,6 +26,6 @@ expression: results
         ],
         execute_mode: Normal,
         exit_term: false,
-        operator_for_next_exec: None,
+        associated_operator: None,
     },
 ]

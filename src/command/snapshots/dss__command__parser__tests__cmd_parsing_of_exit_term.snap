@@ -37,7 +37,7 @@ expression: results
         ],
         execute_mode: Normal,
         exit_term: false,
-        operator_for_next_exec: Some(
+        associated_operator: Some(
             AndIf,
         ),
     },
@@ -45,6 +45,6 @@ expression: results
         cmds: [],
         execute_mode: Normal,
         exit_term: true,
-        operator_for_next_exec: None,
+        associated_operator: None,
     },
 ]

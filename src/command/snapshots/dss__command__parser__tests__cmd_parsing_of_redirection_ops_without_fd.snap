@@ -18,33 +18,11 @@ expression: results
                             1,
                         ),
                     },
-                    Token {
-                        lexeme: "-6",
-                        token_type: Word(
-                            Text,
-                        ),
-                        line: 0,
-                        range: (
-                            3,
-                            4,
-                        ),
-                    },
                 ],
                 path: "ls",
                 negate_exit_status: false,
                 is_unqualified_path: true,
             },
-        ],
-        execute_mode: Normal,
-        exit_term: false,
-        operator_for_next_exec: Some(
-            RedirectOutput(
-                None,
-            ),
-        ),
-    },
-    ParseResult {
-        cmds: [
             Command {
                 tokens: [
                     Token {
@@ -66,6 +44,12 @@ expression: results
         ],
         execute_mode: Normal,
         exit_term: false,
-        operator_for_next_exec: None,
+        associated_operator: Some(
+            RedirectOutput(
+                Some(
+                    -6,
+                ),
+            ),
+        ),
     },
 ]
