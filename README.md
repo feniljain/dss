@@ -1,6 +1,6 @@
 # [WIP] Dead Simple Shell ( DSS )
 
-A minimal UNIX shell clone in Rust
+A minimal POSIX shell clone in Rust
 
 ### Reference:
 
