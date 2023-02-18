@@ -46,3 +46,4 @@
 - [ ] correct signal handling by referencing https://github.com/kkawakam/rustyline
 - [ ] correct handling of "" and {} in commands like `grep "c"` or `awk {print $9}`
 - [X] correct handling of commands like "ls 2> err", for some reason wrong cmd exec in our shell is written on stdout itself
+- [ ] correct subshell command mode entirely, understand it properly and implement again
