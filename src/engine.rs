@@ -130,34 +130,37 @@ impl Engine {
                     // Operators which needs addressing current execution cycle
                     // ( that's why we operate on currernt operator here )
                     match parse_result.associated_operator {
-                        // FIXME: refactor fds set to a map
-                        // FIXME: Use fd_opt
-                        Some(OpType::RedirectOutput(_fd_opt)) => {
+                        Some(OpType::RedirectOutput(fd_opt)) => {
                             let file_path = &parse_result
                                 .cmds
                                 .last()
                                 .expect("expected file path to be present")
                                 .path;
+
+                            // Default value: stdout
+                            let fd_to_be_set = fd_opt.map_or(1, |fd| fd);
 
                             let mut flags = OFlag::O_CREAT;
                             flags.insert(OFlag::O_TRUNC);
                             flags.insert(OFlag::O_WRONLY);
 
                             let file_fd = open(file_path, flags, Mode::S_IRWXU)?;
-                            // Set stdout to file_fd
-                            self.fds_ops.insert(1, FdOperation::Set { to: file_fd });
+                            self.fds_ops.insert(fd_to_be_set, FdOperation::Set { to: file_fd });
                             self.execution_mode = ExecutionMode::Redirect;
                         }
-                        Some(OpType::RedirectInput(_fd_opt)) => {
+                        Some(OpType::RedirectInput(fd_opt)) => {
                             let file_path = &parse_result
                                 .cmds
                                 .last()
                                 .expect("expected file path to be present")
                                 .path;
 
+                            // Default value: stdin
+                            let fd_to_be_set = fd_opt.map_or(0, |fd| fd);
+
                             let file_fd = open(file_path, OFlag::O_RDONLY, Mode::S_IRUSR)?;
                             // Set stdin to file_fd
-                            self.fds_ops.insert(0, FdOperation::Set { to: file_fd });
+                            self.fds_ops.insert(fd_to_be_set, FdOperation::Set { to: file_fd });
                             self.execution_mode = ExecutionMode::Redirect;
                         }
                         Some(OpType::Or) => {
