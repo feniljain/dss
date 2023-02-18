@@ -69,14 +69,14 @@ impl Lexer {
                  * to form an operator, it shall be used as part of that (operator) token.
                  */
                 '&' => {
-                    if let Some(TokenType::Operator(op)) = &self.ctx.last_token_type.clone() {
-                        if op == &Operator::And {
-                            self.tokens.pop();
-                            self.add_token("&&", TokenType::Operator(Operator::AndIf));
-                        }
+                    if let Some(TokenType::Operator(Operator::And)) =
+                        &self.ctx.last_token_type.clone()
+                    {
+                        self.tokens.pop();
+                        self.add_token("&&", TokenType::Operator(Operator::AndIf));
                     } else {
                         self.delimit_word_and_add_token();
-                        self.ctx.last_token_type = Some(TokenType::Operator(Operator::And));
+                        // self.ctx.last_token_type = Some(TokenType::Operator(Operator::And));
                         /* 3. If the previous character was used as part of an operator and
                          * the current char cannot be used with the previous chars to
                          * form an operator, the operator containing the previous char
@@ -86,14 +86,12 @@ impl Lexer {
                     }
                 }
                 '|' => {
-                    if let Some(TokenType::Operator(op)) = &self.ctx.last_token_type {
-                        if op == &Operator::Or {
-                            self.tokens.pop();
-                            self.add_token("||", TokenType::Operator(Operator::OrIf));
-                        }
+                    if let Some(TokenType::Operator(Operator::Or)) = &self.ctx.last_token_type {
+                        self.tokens.pop();
+                        self.add_token("||", TokenType::Operator(Operator::OrIf));
                     } else {
                         self.delimit_word_and_add_token();
-                        self.ctx.last_token_type = Some(TokenType::Operator(Operator::Or));
+                        // self.ctx.last_token_type = Some(TokenType::Operator(Operator::Or));
                         self.add_token("|", TokenType::Operator(Operator::Or));
                     }
                 }
@@ -118,8 +116,18 @@ impl Lexer {
                 }
                 // FIXME: Add support for `>>`
                 '>' => {
-                    self.delimit_word_and_add_token();
-                    self.add_token(">", TokenType::Operator(Operator::RightPointyBracket));
+                    if let Some(TokenType::Operator(Operator::RightPointyBracket)) =
+                        &self.ctx.last_token_type
+                    {
+                        self.tokens.pop();
+                        self.add_token(
+                            ">>",
+                            TokenType::Operator(Operator::DoubleRightPointyBracket),
+                        );
+                    } else {
+                        self.delimit_word_and_add_token();
+                        self.add_token(">", TokenType::Operator(Operator::RightPointyBracket));
+                    }
                 }
                 ' ' => self.delimit_word_and_add_token(),
                 _ => {
@@ -155,6 +163,7 @@ impl Lexer {
     fn add_token<T: Into<String>>(&mut self, lexeme: T, token_type: TokenType) {
         let lexeme: String = lexeme.into();
         let len = lexeme.len();
+        self.ctx.last_token_type = Some(token_type.clone());
 
         /*
          * If it is indicated that a token is delimited, and no characters have been included
@@ -229,7 +238,14 @@ fn is_valid_name_char(ch: char) -> bool {
 }
 
 fn is_valid_name_special_char(ch: char) -> bool {
-    ch == '_' || ch == '-' || ch == '.' || ch == '/' || ch == '"' || ch == '$' || ch == '{' || ch == '}'
+    ch == '_'
+        || ch == '-'
+        || ch == '.'
+        || ch == '/'
+        || ch == '"'
+        || ch == '$'
+        || ch == '{'
+        || ch == '}'
 }
 
 fn is_alpha_numeric(ch: char) -> bool {
@@ -358,8 +374,20 @@ mod tests {
     }
 
     #[test]
-    fn test_lexing_of_pipe_op_with_redirection_without_fd() {
-        let lexer = check(vec!["ls -6> file.txt\n"]);
+    fn test_lexing_of_redirection_without_fd() {
+        let lexer = check(vec!["ls > file.txt\n"]);
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_redirection_op_append_with_fd() {
+        let lexer = check(vec!["ls 6>> file.txt\n"]);
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_redirection_op_append_without_fd() {
+        let lexer = check(vec!["ls >> file.txt\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 }

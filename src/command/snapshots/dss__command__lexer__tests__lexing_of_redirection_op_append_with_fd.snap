@@ -15,24 +15,24 @@ expression: lexer.tokens
         ),
     },
     Token {
-        lexeme: "-6",
+        lexeme: "6",
         token_type: Word(
             Text,
         ),
         line: 0,
         range: (
             3,
-            4,
+            3,
         ),
     },
     Token {
-        lexeme: ">",
+        lexeme: ">>",
         token_type: Operator(
-            RightPointyBracket,
+            DoubleRightPointyBracket,
         ),
         line: 0,
         range: (
-            5,
+            4,
             5,
         ),
     },

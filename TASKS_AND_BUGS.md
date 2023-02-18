@@ -24,8 +24,8 @@
 - [X] add support for multiline commands
 - [X] pass stage 1 tests
 - [X] add support for pipe operators
-- [ ] add support for redirect output operator
-- [ ] add support for redirect input operator
+- [X] add support for redirect output operator
+- [X] add support for redirect input operator
 - [ ] add support for redirect >> operator
 - [ ] add support for redirect <> operator
 - [ ] add support for redirect >& operator

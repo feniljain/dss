@@ -17,6 +17,7 @@ pub struct Parser<'a> {
 pub enum OpType {
     RedirectOutput(Option<i32>),
     RedirectInput(Option<i32>),
+    RedirectAppendOutput(Option<i32>),
     OrIf,
     Pipe,
     AndIf,
@@ -152,6 +153,29 @@ impl<'a> Parser<'a> {
 
                     return Ok(Some(parse_result));
                 }
+                TokenType::Operator(Operator::DoubleRightPointyBracket) => {
+                    if let Some(last_token) = tokens.last() {
+                        if let Ok(fd) = last_token.to_string().parse::<i32>() {
+                            tokens.pop();
+                            parse_result.associated_operator =
+                                Some(OpType::RedirectAppendOutput(Some(fd)));
+                        } else {
+                            parse_result.associated_operator =
+                                Some(OpType::RedirectAppendOutput(None));
+                        }
+                    }
+
+                    let (cmd, file_path_cmd) = self.handle_point_bracket_cmd_gen(
+                        tokens,
+                        cmd_path.expect("expected command path to exist"),
+                        negate_exit_status,
+                    );
+
+                    parse_result.cmds.push(cmd);
+                    parse_result.cmds.push(file_path_cmd);
+
+                    return Ok(Some(parse_result));
+                }
                 TokenType::LeftParen => {
                     capture_only_tokens = true;
                 }
@@ -264,6 +288,10 @@ impl Display for OpType {
             },
             OpType::RedirectInput(fd_opt) => match fd_opt {
                 Some(fd) => format!("{}, >", fd),
+                None => ">".into(),
+            },
+            OpType::RedirectAppendOutput(fd_opt) => match fd_opt {
+                Some(fd) => format!("{}, >>", fd),
                 None => ">".into(),
             },
         };
@@ -379,6 +407,20 @@ mod tests {
     #[test]
     fn test_cmd_parsing_of_redirection_ops_without_fd() {
         let lexer = get_tokens("ls -6> file.txt\n").expect("lexer failed, check lexer tests");
+        let results = check(&lexer.tokens).expect("parser failed :(");
+        insta::assert_debug_snapshot!(results);
+    }
+
+    #[test]
+    fn test_cmd_parsing_of_redirection_append_ops_without_fd() {
+        let lexer = get_tokens("ls -la >> file.txt\n").expect("lexer failed, check lexer tests");
+        let results = check(&lexer.tokens).expect("parser failed :(");
+        insta::assert_debug_snapshot!(results);
+    }
+
+    #[test]
+    fn test_cmd_parsing_of_redirection_append_ops_with_fd() {
+        let lexer = get_tokens("ls -la 2>> file.txt\n").expect("lexer failed, check lexer tests");
         let results = check(&lexer.tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }

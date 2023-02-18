@@ -79,6 +79,7 @@ pub enum Operator {
     Exclamation,  // "!"
     LeftPointyBracket,  // "<"
     RightPointyBracket,  // ">"
+    DoubleRightPointyBracket,  // ">"
 }
 
 impl Display for Operator {
@@ -92,6 +93,7 @@ impl Display for Operator {
             Operator::Exclamation => "!",
             Operator::LeftPointyBracket => "<",
             Operator::RightPointyBracket => ">",
+            Operator::DoubleRightPointyBracket => ">>",
         };
 
         write!(f, "{}", variant_str)
