@@ -13,7 +13,7 @@ pub struct Parser<'a> {
     idx: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum OpType {
     RedirectOutput(Option<i32>),
     RedirectInput(Option<i32>),

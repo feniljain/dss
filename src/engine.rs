@@ -27,7 +27,7 @@ use std::{
 use crate::{
     command::{
         lexer::Lexer,
-        parser::{ExecuteMode, OpType, Parser},
+        parser::{ExecuteMode, OpType, ParseResult, Parser},
         token::Token,
         Command,
     },
@@ -109,8 +109,6 @@ impl Engine {
 
     pub fn parse_and_execute(&mut self, tokens: &Vec<Token>) -> anyhow::Result<bool> {
         let mut parser = Parser::new(tokens);
-        let mut last_operator = None;
-        let mut set_stdin_to: Option<i32> = None;
 
         while let Some(parse_result) = parser.get_command()? {
             if parse_result.exit_term {
@@ -127,91 +125,119 @@ impl Engine {
                     // file path, so it is one command in true sense
                     assert!(parse_result.cmds.len() == 1 || parse_result.cmds.len() == 2);
 
-                    // Operators which needs addressing current execution cycle
-                    // ( that's why we operate on currernt operator here )
-                    match parse_result.associated_operator {
-                        Some(OpType::RedirectOutput(fd_opt)) => {
-                            let file_path = &parse_result
-                                .cmds
-                                .last()
-                                .expect("expected file path to be present")
-                                .path;
-
-                            // Default value: stdout
-                            let fd_to_be_set = fd_opt.map_or(1, |fd| fd);
-
-                            let mut flags = OFlag::O_CREAT;
-                            flags.insert(OFlag::O_TRUNC);
-                            flags.insert(OFlag::O_WRONLY);
-
-                            let file_fd = open(file_path, flags, Mode::S_IRWXU)?;
-                            self.fds_ops.insert(fd_to_be_set, FdOperation::Set { to: file_fd });
-                            self.execution_mode = ExecutionMode::Redirect;
-                        }
-                        Some(OpType::RedirectInput(fd_opt)) => {
-                            let file_path = &parse_result
-                                .cmds
-                                .last()
-                                .expect("expected file path to be present")
-                                .path;
-
-                            // Default value: stdin
-                            let fd_to_be_set = fd_opt.map_or(0, |fd| fd);
-
-                            let file_fd = open(file_path, OFlag::O_RDONLY, Mode::S_IRUSR)?;
-                            // Set stdin to file_fd
-                            self.fds_ops.insert(fd_to_be_set, FdOperation::Set { to: file_fd });
-                            self.execution_mode = ExecutionMode::Redirect;
-                        }
-                        Some(OpType::Or) => {
-                            let (fd0, fd1) = pipe()?;
-                            set_stdin_to = Some(fd0);
-                            self.fds_ops.insert(1, FdOperation::Set { to: fd1 });
-                            self.execution_mode = ExecutionMode::Pipeline;
-                        }
-                        _ => {}
-                    }
-
-                    // Operators which needs addressing next execution cycle
-                    // ( that's why we operate on last operator here )
-                    match last_operator {
-                        Some(OpType::OrIf) => {
-                            if self.execution_successful {
-                                break;
-                            }
-                        }
-                        Some(OpType::AndIf) => {
-                            if !self.execution_successful {
-                                break;
-                            }
-                        }
-                        Some(OpType::Semicolon) => {}
-                        _ => {}
-                    }
+                    let set_stdin_to = self.handle_operations_before_exec(&parse_result)?;
 
                     self.execute_command(parse_result.cmds[0].clone())?;
+
+                    let break_loop = self.handle_operations_after_exec(&parse_result, set_stdin_to)?;
+                    if break_loop {
+                        break;
+                    }
                 }
                 ExecuteMode::Subshell(tokens) => {
                     self.execution_mode = ExecutionMode::Subshell;
                     self.fork_process_and_execute(false, None, ExecuteMode::Subshell(tokens))?;
                 }
             }
-
-            last_operator = parse_result.associated_operator;
-            self.reset_fds_ops();
-
-            // If execution mode last cycle is pipeline
-            if matches!(self.execution_mode, ExecutionMode::Pipeline) {
-                // Read fd from previous pipe operation
-                // to set curr stdin
-                if let Some(fd) = set_stdin_to {
-                    self.fds_ops.insert(0, FdOperation::Set { to: fd });
-                }
-                set_stdin_to = None;
-            }
         }
 
         Ok(false)
+    }
+
+    fn handle_operations_before_exec(
+        &mut self,
+        parse_result: &ParseResult,
+    ) -> anyhow::Result<Option<i32>> {
+        let mut set_stdin_to: Option<i32> = None;
+
+        // Operators which needs addressing current execution cycle
+        // ( that's why we operate on currernt operator here )
+        match parse_result.associated_operator {
+            Some(OpType::RedirectOutput(fd_opt)) => {
+                let file_path = &parse_result
+                    .cmds
+                    .last()
+                    .expect("expected file path to be present")
+                    .path;
+
+                // Default value: stdout
+                let fd_to_be_set = fd_opt.map_or(1, |fd| fd);
+
+                let mut flags = OFlag::O_CREAT;
+                flags.insert(OFlag::O_TRUNC);
+                flags.insert(OFlag::O_WRONLY);
+
+                let file_fd = open(file_path, flags, Mode::S_IRWXU)?;
+                self.fds_ops
+                    .insert(fd_to_be_set, FdOperation::Set { to: file_fd });
+                self.execution_mode = ExecutionMode::Redirect;
+            }
+            Some(OpType::RedirectInput(fd_opt)) => {
+                let file_path = &parse_result
+                    .cmds
+                    .last()
+                    .expect("expected file path to be present")
+                    .path;
+
+                // Default value: stdin
+                let fd_to_be_set = fd_opt.map_or(0, |fd| fd);
+
+                let file_fd = open(file_path, OFlag::O_RDONLY, Mode::S_IRUSR)?;
+                // Set stdin to file_fd
+                self.fds_ops
+                    .insert(fd_to_be_set, FdOperation::Set { to: file_fd });
+                self.execution_mode = ExecutionMode::Redirect;
+            }
+            Some(OpType::Or) => {
+                let (fd0, fd1) = pipe()?;
+                set_stdin_to = Some(fd0);
+                self.fds_ops.insert(1, FdOperation::Set { to: fd1 });
+                self.execution_mode = ExecutionMode::Pipeline;
+            }
+            _ => {}
+        }
+
+        Ok(set_stdin_to)
+    }
+
+    fn handle_operations_after_exec(
+        &mut self,
+        parse_result: &ParseResult,
+        set_stdin_to: Option<i32>,
+    ) -> anyhow::Result<bool> {
+        let mut break_loop = false;
+
+        // Operators which needs addressing next execution cycle
+        // ( that's why we operate on last operator here )
+        match parse_result.associated_operator {
+            Some(OpType::OrIf) => {
+                if self.execution_successful {
+                    break_loop = true;
+                    return Ok(break_loop);
+                }
+            }
+            Some(OpType::AndIf) => {
+                if !self.execution_successful {
+                    break_loop = true;
+                    return Ok(break_loop);
+                }
+            }
+            Some(OpType::Semicolon) => {}
+            _ => {}
+        }
+
+        self.reset_fds_ops();
+
+        // If execution mode last cycle is pipeline
+        if matches!(self.execution_mode, ExecutionMode::Pipeline) {
+            // Read fd from previous pipe operation
+            // to set curr stdin
+            if let Some(fd) = set_stdin_to {
+                self.fds_ops.insert(0, FdOperation::Set { to: fd });
+            }
+        }
+
+        Ok(break_loop)
     }
 
     fn reset_fds_ops(&mut self) {
