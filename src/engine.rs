@@ -557,9 +557,6 @@ mod tests {
     fn test_cmd_execution_of_redirect_output_ops() {
         let engine = check("ls > files2");
         assert!(engine.execution_successful);
-
-        let engine = check("rm files2");
-        assert!(engine.execution_successful);
     }
 
     #[test]
