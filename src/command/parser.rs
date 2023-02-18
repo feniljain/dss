@@ -18,6 +18,9 @@ pub enum OpType {
     RedirectOutput(Option<i32>),
     RedirectInput(Option<i32>),
     RedirectAppendOutput(Option<i32>),
+    RedirectReadWrite(Option<i32>),
+    RedirectSquirrelOutput(Option<i32>),
+    RedirectSquirrelInput(Option<i32>),
     OrIf,
     Pipe,
     AndIf,
@@ -108,7 +111,8 @@ impl<'a> Parser<'a> {
                     }
                     negate_exit_status = true;
                 }
-                // FIXME: Add support for `>>`, `<>`
+                // FIXME: use macro to remove this repeated code
+                // for redirect operators below
                 TokenType::Operator(Operator::LeftPointyBracket) => {
                     if let Some(last_token) = tokens.last() {
                         if let Ok(fd) = last_token.to_string().parse::<i32>() {
@@ -162,6 +166,75 @@ impl<'a> Parser<'a> {
                         } else {
                             parse_result.associated_operator =
                                 Some(OpType::RedirectAppendOutput(None));
+                        }
+                    }
+
+                    let (cmd, file_path_cmd) = self.handle_point_bracket_cmd_gen(
+                        tokens,
+                        cmd_path.expect("expected command path to exist"),
+                        negate_exit_status,
+                    );
+
+                    parse_result.cmds.push(cmd);
+                    parse_result.cmds.push(file_path_cmd);
+
+                    return Ok(Some(parse_result));
+                }
+                TokenType::Operator(Operator::DiamondPointyBrackets) => {
+                    if let Some(last_token) = tokens.last() {
+                        if let Ok(fd) = last_token.to_string().parse::<i32>() {
+                            tokens.pop();
+                            parse_result.associated_operator =
+                                Some(OpType::RedirectReadWrite(Some(fd)));
+                        } else {
+                            parse_result.associated_operator =
+                                Some(OpType::RedirectReadWrite(None));
+                        }
+                    }
+
+                    let (cmd, file_path_cmd) = self.handle_point_bracket_cmd_gen(
+                        tokens,
+                        cmd_path.expect("expected command path to exist"),
+                        negate_exit_status,
+                    );
+
+                    parse_result.cmds.push(cmd);
+                    parse_result.cmds.push(file_path_cmd);
+
+                    return Ok(Some(parse_result));
+                }
+                TokenType::Operator(Operator::SquirrelOutput) => {
+                    if let Some(last_token) = tokens.last() {
+                        if let Ok(fd) = last_token.to_string().parse::<i32>() {
+                            tokens.pop();
+                            parse_result.associated_operator =
+                                Some(OpType::RedirectSquirrelOutput(Some(fd)));
+                        } else {
+                            parse_result.associated_operator =
+                                Some(OpType::RedirectSquirrelOutput(None));
+                        }
+                    }
+
+                    let (cmd, file_path_cmd) = self.handle_point_bracket_cmd_gen(
+                        tokens,
+                        cmd_path.expect("expected command path to exist"),
+                        negate_exit_status,
+                    );
+
+                    parse_result.cmds.push(cmd);
+                    parse_result.cmds.push(file_path_cmd);
+
+                    return Ok(Some(parse_result));
+                }
+                TokenType::Operator(Operator::SquirrelInput) => {
+                    if let Some(last_token) = tokens.last() {
+                        if let Ok(fd) = last_token.to_string().parse::<i32>() {
+                            tokens.pop();
+                            parse_result.associated_operator =
+                                Some(OpType::RedirectSquirrelInput(Some(fd)));
+                        } else {
+                            parse_result.associated_operator =
+                                Some(OpType::RedirectSquirrelInput(None));
                         }
                     }
 
@@ -294,6 +367,18 @@ impl Display for OpType {
                 Some(fd) => format!("{}, >>", fd),
                 None => ">".into(),
             },
+            OpType::RedirectReadWrite(fd_opt) => match fd_opt {
+                Some(fd) => format!("{}, <>", fd),
+                None => ">".into(),
+            },
+            OpType::RedirectSquirrelOutput(fd_opt) => match fd_opt {
+                Some(fd) => format!("{}, &>", fd),
+                None => ">".into(),
+            },
+            OpType::RedirectSquirrelInput(fd_opt) => match fd_opt {
+                Some(fd) => format!("{}, <&", fd),
+                None => ">".into(),
+            },
         };
 
         write!(f, "{}", variant_str)
@@ -421,6 +506,48 @@ mod tests {
     #[test]
     fn test_cmd_parsing_of_redirection_append_ops_with_fd() {
         let lexer = get_tokens("ls -la 2>> file.txt\n").expect("lexer failed, check lexer tests");
+        let results = check(&lexer.tokens).expect("parser failed :(");
+        insta::assert_debug_snapshot!(results);
+    }
+
+    #[test]
+    fn test_cmd_parsing_of_redirection_read_write_ops_without_fd() {
+        let lexer = get_tokens("ls -la <> file.txt\n").expect("lexer failed, check lexer tests");
+        let results = check(&lexer.tokens).expect("parser failed :(");
+        insta::assert_debug_snapshot!(results);
+    }
+
+    #[test]
+    fn test_cmd_parsing_of_redirection_read_write_ops_with_fd() {
+        let lexer = get_tokens("ls -la 2<> file.txt\n").expect("lexer failed, check lexer tests");
+        let results = check(&lexer.tokens).expect("parser failed :(");
+        insta::assert_debug_snapshot!(results);
+    }
+
+    #[test]
+    fn test_cmd_parsing_of_redirection_squirrel_output_ops_with_fd() {
+        let lexer = get_tokens("ls -la 2&> file.txt\n").expect("lexer failed, check lexer tests");
+        let results = check(&lexer.tokens).expect("parser failed :(");
+        insta::assert_debug_snapshot!(results);
+    }
+
+    #[test]
+    fn test_cmd_parsing_of_redirection_squirrel_output_ops_without_fd() {
+        let lexer = get_tokens("ls -la &> file.txt\n").expect("lexer failed, check lexer tests");
+        let results = check(&lexer.tokens).expect("parser failed :(");
+        insta::assert_debug_snapshot!(results);
+    }
+
+    #[test]
+    fn test_cmd_parsing_of_redirection_squirrel_input_ops_with_fd() {
+        let lexer = get_tokens("ls -la 2<& file.txt\n").expect("lexer failed, check lexer tests");
+        let results = check(&lexer.tokens).expect("parser failed :(");
+        insta::assert_debug_snapshot!(results);
+    }
+
+    #[test]
+    fn test_cmd_parsing_of_redirection_squirrel_input_ops_without_fd() {
+        let lexer = get_tokens("ls -la <& file.txt\n").expect("lexer failed, check lexer tests");
         let results = check(&lexer.tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }

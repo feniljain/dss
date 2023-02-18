@@ -1,0 +1,39 @@
+---
+source: src/command/lexer.rs
+expression: lexer.tokens
+---
+[
+    Token {
+        lexeme: "ls",
+        token_type: Word(
+            Text,
+        ),
+        line: 0,
+        range: (
+            0,
+            1,
+        ),
+    },
+    Token {
+        lexeme: "<&",
+        token_type: Operator(
+            SquirrelInput,
+        ),
+        line: 0,
+        range: (
+            3,
+            4,
+        ),
+    },
+    Token {
+        lexeme: "file.txt",
+        token_type: Word(
+            Text,
+        ),
+        line: 0,
+        range: (
+            6,
+            13,
+        ),
+    },
+]

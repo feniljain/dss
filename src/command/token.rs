@@ -80,6 +80,9 @@ pub enum Operator {
     LeftPointyBracket,  // "<"
     RightPointyBracket,  // ">"
     DoubleRightPointyBracket,  // ">"
+    DiamondPointyBrackets,  // "<>"
+    SquirrelOutput,  // "&>"
+    SquirrelInput,  // "<&"
 }
 
 impl Display for Operator {
@@ -94,6 +97,9 @@ impl Display for Operator {
             Operator::LeftPointyBracket => "<",
             Operator::RightPointyBracket => ">",
             Operator::DoubleRightPointyBracket => ">>",
+            Operator::DiamondPointyBrackets => "<>",
+            Operator::SquirrelOutput => "&>",
+            Operator::SquirrelInput => "<&",
         };
 
         write!(f, "{}", variant_str)

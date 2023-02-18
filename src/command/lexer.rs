@@ -69,11 +69,14 @@ impl Lexer {
                  * to form an operator, it shall be used as part of that (operator) token.
                  */
                 '&' => {
-                    if let Some(TokenType::Operator(Operator::And)) =
-                        &self.ctx.last_token_type.clone()
-                    {
+                    if let Some(TokenType::Operator(Operator::And)) = &self.ctx.last_token_type {
                         self.tokens.pop();
                         self.add_token("&&", TokenType::Operator(Operator::AndIf));
+                    } else if let Some(TokenType::Operator(Operator::LeftPointyBracket)) =
+                        &self.ctx.last_token_type
+                    {
+                        self.tokens.pop();
+                        self.add_token("<&", TokenType::Operator(Operator::SquirrelInput));
                     } else {
                         self.delimit_word_and_add_token();
                         // self.ctx.last_token_type = Some(TokenType::Operator(Operator::And));
@@ -114,7 +117,6 @@ impl Lexer {
                     self.delimit_word_and_add_token();
                     self.add_token("<", TokenType::Operator(Operator::LeftPointyBracket));
                 }
-                // FIXME: Add support for `>>`
                 '>' => {
                     if let Some(TokenType::Operator(Operator::RightPointyBracket)) =
                         &self.ctx.last_token_type
@@ -124,6 +126,16 @@ impl Lexer {
                             ">>",
                             TokenType::Operator(Operator::DoubleRightPointyBracket),
                         );
+                    } else if let Some(TokenType::Operator(Operator::LeftPointyBracket)) =
+                        &self.ctx.last_token_type
+                    {
+                        self.tokens.pop();
+                        self.add_token("<>", TokenType::Operator(Operator::DiamondPointyBrackets));
+                    } else if let Some(TokenType::Operator(Operator::And)) =
+                        &self.ctx.last_token_type
+                    {
+                        self.tokens.pop();
+                        self.add_token("&>", TokenType::Operator(Operator::SquirrelOutput));
                     } else {
                         self.delimit_word_and_add_token();
                         self.add_token(">", TokenType::Operator(Operator::RightPointyBracket));
@@ -388,6 +400,42 @@ mod tests {
     #[test]
     fn test_lexing_of_redirection_op_append_without_fd() {
         let lexer = check(vec!["ls >> file.txt\n"]);
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_redirection_op_diamond_without_fd() {
+        let lexer = check(vec!["ls <> file.txt\n"]);
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_redirection_op_diamond_with_fd() {
+        let lexer = check(vec!["ls 2<> file.txt\n"]);
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_squirrel_output_op_diamond_with_fd() {
+        let lexer = check(vec!["ls 2&> file.txt\n"]);
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_squirrel_output_op_diamond_without_fd() {
+        let lexer = check(vec!["ls &> file.txt\n"]);
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_squirrel_input_op_diamond_with_fd() {
+        let lexer = check(vec!["ls 2<& file.txt\n"]);
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_squirrel_input_op_diamond_without_fd() {
+        let lexer = check(vec!["ls <& file.txt\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 }

@@ -1,0 +1,66 @@
+---
+source: src/command/parser.rs
+expression: results
+---
+[
+    ParseResult {
+        cmds: [
+            Command {
+                tokens: [
+                    Token {
+                        lexeme: "ls",
+                        token_type: Word(
+                            Text,
+                        ),
+                        line: 0,
+                        range: (
+                            0,
+                            1,
+                        ),
+                    },
+                    Token {
+                        lexeme: "-la",
+                        token_type: Word(
+                            Text,
+                        ),
+                        line: 0,
+                        range: (
+                            3,
+                            5,
+                        ),
+                    },
+                ],
+                path: "ls",
+                negate_exit_status: false,
+                is_unqualified_path: true,
+            },
+            Command {
+                tokens: [
+                    Token {
+                        lexeme: "file.txt",
+                        token_type: Word(
+                            Text,
+                        ),
+                        line: 0,
+                        range: (
+                            11,
+                            18,
+                        ),
+                    },
+                ],
+                path: "file.txt",
+                negate_exit_status: false,
+                is_unqualified_path: true,
+            },
+        ],
+        execute_mode: Normal,
+        exit_term: false,
+        associated_operator: Some(
+            RedirectSquirrelOutput(
+                Some(
+                    2,
+                ),
+            ),
+        ),
+    },
+]

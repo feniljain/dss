@@ -49,6 +49,7 @@ pub struct Engine {
 #[derive(Copy, Clone, Debug)]
 enum FdOperation {
     Set { to: i32 },
+    Close,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -156,48 +157,104 @@ impl Engine {
         parse_result: &ParseResult,
     ) -> anyhow::Result<Option<i32>> {
         let mut set_stdin_to: Option<i32> = None;
+        let last_cmd = parse_result
+            .cmds
+            .last()
+            .expect("expected file path to be present");
+        let file_path = &last_cmd.path;
 
         // Operators which needs addressing before execution starts
         match parse_result.associated_operator {
             Some(OpType::RedirectAppendOutput(fd_opt)) | Some(OpType::RedirectOutput(fd_opt)) => {
-                let file_path = &parse_result
-                    .cmds
-                    .last()
-                    .expect("expected file path to be present")
-                    .path;
-
                 // Default value: stdout
                 let fd_to_be_set = fd_opt.map_or(1, |fd| fd);
 
                 let mut flags = OFlag::O_CREAT;
-
-                if matches!(parse_result.associated_operator, Some(OpType::RedirectOutput(_))) {
+                if matches!(
+                    parse_result.associated_operator,
+                    Some(OpType::RedirectOutput(_))
+                ) {
                     flags.insert(OFlag::O_TRUNC);
                 } else {
                     flags.insert(OFlag::O_APPEND);
                 }
-
                 flags.insert(OFlag::O_WRONLY);
 
-                let file_fd = open(file_path, flags, Mode::S_IRWXU)?;
+                let mut mode = Mode::S_IRUSR;
+                mode.insert(Mode::S_IWUSR);
+
+                let file_fd = open(file_path, flags, mode)?;
                 self.fds_ops
                     .insert(fd_to_be_set, FdOperation::Set { to: file_fd });
 
                 self.execution_mode = ExecutionMode::Redirect;
             }
-            Some(OpType::RedirectInput(fd_opt)) => {
-                let file_path = &parse_result
-                    .cmds
-                    .last()
-                    .expect("expected file path to be present")
-                    .path;
-
+            Some(OpType::RedirectInput(fd_opt)) | Some(OpType::RedirectReadWrite(fd_opt)) => {
                 // Default value: stdin
                 let fd_to_be_set = fd_opt.map_or(0, |fd| fd);
 
-                let file_fd = open(file_path, OFlag::O_RDONLY, Mode::S_IRUSR)?;
+                let (flags, mode) = if matches!(
+                    parse_result.associated_operator,
+                    Some(OpType::RedirectReadWrite(_))
+                ) {
+                    let mut flags = OFlag::O_CREAT;
+                    flags.insert(OFlag::O_RDWR);
+
+                    (flags, Mode::S_IRWXU)
+                } else {
+                    (OFlag::O_RDONLY, Mode::S_IRUSR)
+                };
+
+                let file_fd = open(file_path, flags, mode)?;
                 self.fds_ops
                     .insert(fd_to_be_set, FdOperation::Set { to: file_fd });
+
+                self.execution_mode = ExecutionMode::Redirect;
+            }
+            Some(OpType::RedirectSquirrelOutput(fd_opt)) => {
+                // Default value: stdout
+                let fd_to_be_set = fd_opt.map_or(1, |fd| fd);
+
+                let last_token = &last_cmd
+                    .tokens
+                    .last()
+                    .expect("expected last token to be present")
+                    .lexeme;
+
+                if last_token == "-" {
+                    self.fds_ops.insert(fd_to_be_set, FdOperation::Close);
+                } else {
+                    let mut flags = OFlag::O_CREAT;
+                    flags.insert(OFlag::O_TRUNC);
+                    flags.insert(OFlag::O_WRONLY);
+
+                    let mut mode = Mode::S_IRUSR;
+                    mode.insert(Mode::S_IWUSR);
+
+                    let file_fd = open(file_path, flags, mode)?;
+                    self.fds_ops
+                        .insert(fd_to_be_set, FdOperation::Set { to: file_fd });
+                }
+
+                self.execution_mode = ExecutionMode::Redirect;
+            }
+            Some(OpType::RedirectSquirrelInput(fd_opt)) => {
+                // Default value: stdout
+                let fd_to_be_set = fd_opt.map_or(0, |fd| fd);
+
+                let last_token = &last_cmd
+                    .tokens
+                    .last()
+                    .expect("expected last token to be present")
+                    .lexeme;
+
+                if last_token == "-" {
+                    self.fds_ops.insert(fd_to_be_set, FdOperation::Close);
+                } else {
+                    let file_fd = open(file_path, OFlag::O_RDONLY, Mode::S_IRUSR)?;
+                    self.fds_ops
+                        .insert(fd_to_be_set, FdOperation::Set { to: file_fd });
+                }
 
                 self.execution_mode = ExecutionMode::Redirect;
             }
@@ -321,6 +378,9 @@ impl Engine {
                             }
                             close(*to)?;
                         }
+                        FdOperation::Close => {
+                            close(*fd)?;
+                        }
                     }
                 }
 
@@ -366,6 +426,9 @@ impl Engine {
                             FdOperation::Set { to } => {
                                 dup2(*to, *fd)?;
                                 close(*to)?;
+                            }
+                            FdOperation::Close => {
+                                close(*fd)?;
                             }
                         }
                     }
@@ -609,6 +672,24 @@ mod tests {
     #[test]
     fn test_cmd_execution_of_redirect_append_ops() {
         let engine = check("echo foo >> files2");
+        assert!(engine.execution_successful);
+    }
+
+    #[test]
+    fn test_cmd_execution_of_redirect_read_write_ops() {
+        let engine = check("echo foo <> files2");
+        assert!(engine.execution_successful);
+    }
+
+    #[test]
+    fn test_cmd_execution_of_redirect_squirrel_output() {
+        let engine = check("echo foo &> files2");
+        assert!(engine.execution_successful);
+    }
+
+    #[test]
+    fn test_cmd_execution_of_redirect_squirrel_input() {
+        let engine = check("echo foo <& files2");
         assert!(engine.execution_successful);
     }
 }
