@@ -20,9 +20,17 @@
 - [X] add parser tests
 - [X] add tests for execution status
 - [X] after stage 1 refactor code to have a separate engine and cmd parsing
-- [ ] add support for subshell commands
-- [ ] add support for multiline commands
-- [ ] pass stage 1 tests
+- [X] add support for subshell commands
+- [X] add support for multiline commands
+- [X] pass stage 1 tests
+- [X] add support for pipe operators
+- [ ] add support for redirect output operator
+- [ ] add support for redirect input operator
+- [ ] add support for redirect >> operator
+- [ ] add support for redirect <> operator
+- [ ] add support for redirect >& operator
+- [ ] add support for redirect <& operator
+- [ ] add support for fd in redirect operations
 
 ## Bonus Tasks:
 

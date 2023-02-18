@@ -11,6 +11,7 @@ use nix::{
 use signal_hook::consts;
 
 use std::{
+    collections::HashMap,
     convert::Infallible,
     ffi::{CStr, CString},
     io,
@@ -40,9 +41,14 @@ const BUILTIN_COMMANDS: [&str; 2] = ["cd", "exec"];
 pub struct Engine {
     pub execution_successful: bool,
     pub env_paths: Vec<String>,
-    pub set_stdin_to: i32,
-    pub set_stdout_to: i32,
     execution_mode: ExecutionMode,
+    // Operations to be done on different `fd`s
+    fds_ops: HashMap<i32, FdOperation>,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum FdOperation {
+    Set { to: i32 },
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -50,7 +56,7 @@ enum ExecutionMode {
     Normal,
     Subshell,
     Pipeline,
-    Redirect { file_fd: i32 },
+    Redirect,
 }
 
 impl Engine {
@@ -59,8 +65,7 @@ impl Engine {
             execution_successful: true,
             env_paths: parse_paths(),
             execution_mode: ExecutionMode::Normal,
-            set_stdin_to: 0,
-            set_stdout_to: 1,
+            fds_ops: HashMap::new(),
         }
     }
 
@@ -105,7 +110,7 @@ impl Engine {
     pub fn parse_and_execute(&mut self, tokens: &Vec<Token>) -> anyhow::Result<bool> {
         let mut parser = Parser::new(tokens);
         let mut last_operator = None;
-        let mut set_stdin_to = None;
+        let mut set_stdin_to: Option<i32> = None;
 
         while let Some(parse_result) = parser.get_command()? {
             if parse_result.exit_term {
@@ -121,13 +126,6 @@ impl Engine {
                     // while 2 commands for redirect opertaor, second command contains
                     // file path, so it is one command in true sense
                     assert!(parse_result.cmds.len() == 1 || parse_result.cmds.len() == 2);
-
-                    // Read fd from previous pipe operation
-                    // to set curr stdin
-                    if let Some(fd) = set_stdin_to {
-                        self.set_stdin_to = fd;
-                    }
-                    set_stdin_to = None;
 
                     // Operators which needs addressing current execution cycle
                     // ( that's why we operate on currernt operator here )
@@ -145,10 +143,10 @@ impl Engine {
                             flags.insert(OFlag::O_TRUNC);
                             flags.insert(OFlag::O_WRONLY);
 
-                            // FIXME: Correct permissions
                             let file_fd = open(file_path, flags, Mode::S_IRWXU)?;
-                            self.set_stdout_to = file_fd;
-                            self.execution_mode = ExecutionMode::Redirect { file_fd };
+                            // Set stdout to file_fd
+                            self.fds_ops.insert(1, FdOperation::Set { to: file_fd });
+                            self.execution_mode = ExecutionMode::Redirect;
                         }
                         Some(OpType::RedirectInput(_fd_opt)) => {
                             let file_path = &parse_result
@@ -157,19 +155,15 @@ impl Engine {
                                 .expect("expected file path to be present")
                                 .path;
 
-                            let mut flags = OFlag::O_CREAT;
-                            flags.insert(OFlag::O_TRUNC);
-                            flags.insert(OFlag::O_WRONLY);
-
-                            let file_fd = open(file_path, flags, Mode::S_IROTH)?;
-                            self.set_stdin_to = file_fd;
-                            self.execution_mode = ExecutionMode::Redirect { file_fd };
-                            continue;
+                            let file_fd = open(file_path, OFlag::O_RDONLY, Mode::S_IRUSR)?;
+                            // Set stdin to file_fd
+                            self.fds_ops.insert(0, FdOperation::Set { to: file_fd });
+                            self.execution_mode = ExecutionMode::Redirect;
                         }
                         Some(OpType::Or) => {
                             let (fd0, fd1) = pipe()?;
                             set_stdin_to = Some(fd0);
-                            self.set_stdout_to = fd1;
+                            self.fds_ops.insert(1, FdOperation::Set { to: fd1 });
                             self.execution_mode = ExecutionMode::Pipeline;
                         }
                         _ => {}
@@ -201,15 +195,24 @@ impl Engine {
             }
 
             last_operator = parse_result.associated_operator;
-            self.reset_stdin_out_fds();
+            self.reset_fds_ops();
+
+            // If execution mode last cycle is pipeline
+            if matches!(self.execution_mode, ExecutionMode::Pipeline) {
+                // Read fd from previous pipe operation
+                // to set curr stdin
+                if let Some(fd) = set_stdin_to {
+                    self.fds_ops.insert(0, FdOperation::Set { to: fd });
+                }
+                set_stdin_to = None;
+            }
         }
 
         Ok(false)
     }
 
-    fn reset_stdin_out_fds(&mut self) {
-        self.set_stdin_to = 0;
-        self.set_stdout_to = 1;
+    fn reset_fds_ops(&mut self) {
+        self.fds_ops = HashMap::new();
     }
 
     fn execute_command(&mut self, command: Command) -> anyhow::Result<()> {
@@ -267,17 +270,17 @@ impl Engine {
             Ok(ForkResult::Parent {
                 child: child_pid, ..
             }) => {
-                // This fd is not needed in parent anymore,
-                // child will write to it
-                if matches!(self.execution_mode, ExecutionMode::Pipeline) {
-                    if self.set_stdout_to != 1 {
-                        close(self.set_stdout_to)?;
+                for (fd, value) in &self.fds_ops {
+                    match value {
+                        FdOperation::Set { to } => {
+                            // We do not to close stdins cause they
+                            // need to go to next iteration
+                            if *fd == 0 {
+                                continue;
+                            }
+                            close(*to)?;
+                        }
                     }
-                }
-
-                // Close opened file in redirect mode
-                if let ExecutionMode::Redirect { file_fd } = self.execution_mode {
-                    close(file_fd)?;
                 }
 
                 // We do not wait for forked children if the command is
@@ -286,6 +289,9 @@ impl Engine {
                 // Note: last command in the pipeline is the only one
                 // we wait for ( that gets handled cause we only set
                 // pipe execution mode when we receive a pipe operator )
+                //
+                // TIP: While debugging piping related issues, comment this if
+                // condition and let it wait on each command execution
                 if !matches!(self.execution_mode, ExecutionMode::Pipeline) {
                     let wait_status = waitpid(child_pid, None).expect(&format!(
                         "Expected to wait for child with pid: {:?}",
@@ -314,16 +320,13 @@ impl Engine {
                     let command =
                         command.expect("internal error: should have contained valid command");
 
-                    // Only change file descriptors of stdin
-                    // and stdout if they are different from
-                    // standard ones
-                    if self.set_stdin_to != 0 {
-                        dup2(self.set_stdin_to, 0)?;
-                        close(self.set_stdin_to)?;
-                    }
-                    if self.set_stdout_to != 1 {
-                        dup2(self.set_stdout_to, 1)?;
-                        close(self.set_stdout_to)?;
+                    for (fd, op) in &self.fds_ops {
+                        match op {
+                            FdOperation::Set { to } => {
+                                dup2(*to, *fd)?;
+                                close(*to)?;
+                            }
+                        }
                     }
 
                     execute_external_cmd(command.clone(), self.env_paths.clone())?;
@@ -391,9 +394,6 @@ fn execute_external_cmd(command: Command, env_paths: Vec<String>) -> anyhow::Res
 
 fn execve_(path: &PathBuf, args: &[CString]) -> nix::Result<Infallible> {
     let path = CString::new(path.as_os_str().as_bytes()).expect("Could not construct CString path");
-
-    // println!("path: {:?}", path);
-    // println!("args: {:?}", args);
 
     // match execve::<CString, CString>(&path, args, &[]) {
     //     Ok(_) => {}
@@ -546,12 +546,21 @@ mod tests {
 
     #[test]
     fn test_cmd_execution_of_piped_cmds() {
-        let engine = check("ls | grep c");
+        let engine = check(" ls -la | grep c | sort | uniq");
         assert!(engine.execution_successful);
     }
 
     #[test]
-    fn test_cmd_execution_of_redirect_ops() {
+    fn test_cmd_execution_of_redirect_output_ops() {
+        let engine = check("ls > files2");
+        assert!(engine.execution_successful);
+
+        let engine = check("rm files2");
+        assert!(engine.execution_successful);
+    }
+
+    #[test]
+    fn test_cmd_execution_of_redirect_input_ops() {
         let engine = check("ls > files2");
         assert!(engine.execution_successful);
 
