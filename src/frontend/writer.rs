@@ -14,12 +14,22 @@ pub enum Color {
     White,
 }
 
-pub fn write_to_shell(output: &str) -> anyhow::Result<()> {
+pub fn write_to_stdout(output: &str) -> anyhow::Result<()> {
     io::stdout().write_all(output.as_bytes())?;
 
     // Flushing is important because:
     // https://stackoverflow.com/questions/34993744/why-does-this-read-input-before-printing
     io::stdout().flush().expect("flush failed!");
+
+    Ok(())
+}
+
+pub fn write_to_stderr(output: &str) -> anyhow::Result<()> {
+    io::stderr().write_all(output.as_bytes())?;
+
+    // Flushing is important because:
+    // https://stackoverflow.com/questions/34993744/why-does-this-read-input-before-printing
+    io::stderr().flush().expect("flush failed!");
 
     Ok(())
 }
@@ -44,9 +54,9 @@ pub fn write_error_to_shell(
     is_unqualified_path: bool,
 ) -> anyhow::Result<()> {
     if is_unqualified_path {
-        write_to_shell(&format!("dss: command not found: {}\n", cmd_str))?;
+        write_to_stderr(&format!("dss: command not found: {}\n", cmd_str))?;
     } else {
-        write_to_shell(&format!("dss: {}: {}\n", errno.desc(), cmd_str))?;
+        write_to_stderr(&format!("dss: {}: {}\n", errno.desc(), cmd_str))?;
     }
 
     Ok(())

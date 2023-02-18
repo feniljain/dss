@@ -32,7 +32,7 @@ use crate::{
         Command,
     },
     errors::ShellError,
-    frontend::{write_error_to_shell, write_to_shell, Prompt},
+    frontend::{write_error_to_shell, write_to_stderr, write_to_stdout, Prompt},
 };
 
 const BUILTIN_COMMANDS: [&str; 2] = ["cd", "exec"];
@@ -70,7 +70,7 @@ impl Engine {
     }
 
     pub fn fire_on(&mut self) -> anyhow::Result<()> {
-        write_to_shell("Welcome to Dead Simple Shell!\n")?;
+        write_to_stdout("Welcome to Dead Simple Shell!\n")?;
 
         let term = Arc::new(AtomicBool::new(false));
         signal_hook::flag::register(consts::SIGINT, Arc::clone(&term))?;
@@ -314,7 +314,7 @@ impl Engine {
                             self.execution_successful = exit_code == 0;
                             return Ok(exit_code == 0);
                         }
-                        _ => write_to_shell(&format!("Did not get exited: {:?}", wait_status))?,
+                        _ => write_to_stderr(&format!("Did not get exited: {:?}", wait_status))?,
                     }
                 }
             }
