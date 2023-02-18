@@ -159,7 +159,7 @@ impl Engine {
 
         // Operators which needs addressing before execution starts
         match parse_result.associated_operator {
-            Some(OpType::RedirectOutput(fd_opt)) => {
+            Some(OpType::RedirectAppendOutput(fd_opt)) | Some(OpType::RedirectOutput(fd_opt)) => {
                 let file_path = &parse_result
                     .cmds
                     .last()
@@ -170,7 +170,13 @@ impl Engine {
                 let fd_to_be_set = fd_opt.map_or(1, |fd| fd);
 
                 let mut flags = OFlag::O_CREAT;
-                flags.insert(OFlag::O_TRUNC);
+
+                if matches!(parse_result.associated_operator, Some(OpType::RedirectOutput(_))) {
+                    flags.insert(OFlag::O_TRUNC);
+                } else {
+                    flags.insert(OFlag::O_APPEND);
+                }
+
                 flags.insert(OFlag::O_WRONLY);
 
                 let file_fd = open(file_path, flags, Mode::S_IRWXU)?;
@@ -597,6 +603,12 @@ mod tests {
         assert!(engine.execution_successful);
 
         let engine = check("rm files2");
+        assert!(engine.execution_successful);
+    }
+
+    #[test]
+    fn test_cmd_execution_of_redirect_append_ops() {
+        let engine = check("echo foo >> files2");
         assert!(engine.execution_successful);
     }
 }
