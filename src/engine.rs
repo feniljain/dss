@@ -76,9 +76,14 @@ impl Engine {
         signal_hook::flag::register(consts::SIGINT, Arc::clone(&term))?;
 
         let mut prompt = Prompt::new();
+        // For handling SIGINT
         while !term.load(Ordering::Relaxed) {
             let mut lexer = Lexer::new();
             while !lexer.complete_processing() {
+                // If we have more than 1 tokens
+                // at this stage, we would have parsed
+                // some last cycle, which means we are
+                // in multiline mode
                 if lexer.tokens.len() > 0 {
                     prompt.activate_multiline_prompt();
                 }
@@ -118,6 +123,7 @@ impl Engine {
             match parse_result.execute_mode {
                 ExecuteMode::Normal => {
                     self.execution_mode = ExecutionMode::Normal;
+
                     // Currently trying to follow a philosophy of only executing
                     // one command at a time for separators and other normal stuff
                     //
@@ -129,7 +135,8 @@ impl Engine {
 
                     self.execute_command(parse_result.cmds[0].clone())?;
 
-                    let break_loop = self.handle_operations_after_exec(&parse_result, set_stdin_to)?;
+                    let break_loop =
+                        self.handle_operations_after_exec(&parse_result, set_stdin_to)?;
                     if break_loop {
                         break;
                     }
@@ -150,8 +157,7 @@ impl Engine {
     ) -> anyhow::Result<Option<i32>> {
         let mut set_stdin_to: Option<i32> = None;
 
-        // Operators which needs addressing current execution cycle
-        // ( that's why we operate on currernt operator here )
+        // Operators which needs addressing before execution starts
         match parse_result.associated_operator {
             Some(OpType::RedirectOutput(fd_opt)) => {
                 let file_path = &parse_result
@@ -170,6 +176,7 @@ impl Engine {
                 let file_fd = open(file_path, flags, Mode::S_IRWXU)?;
                 self.fds_ops
                     .insert(fd_to_be_set, FdOperation::Set { to: file_fd });
+
                 self.execution_mode = ExecutionMode::Redirect;
             }
             Some(OpType::RedirectInput(fd_opt)) => {
@@ -183,12 +190,12 @@ impl Engine {
                 let fd_to_be_set = fd_opt.map_or(0, |fd| fd);
 
                 let file_fd = open(file_path, OFlag::O_RDONLY, Mode::S_IRUSR)?;
-                // Set stdin to file_fd
                 self.fds_ops
                     .insert(fd_to_be_set, FdOperation::Set { to: file_fd });
+
                 self.execution_mode = ExecutionMode::Redirect;
             }
-            Some(OpType::Or) => {
+            Some(OpType::Pipe) => {
                 let (fd0, fd1) = pipe()?;
                 set_stdin_to = Some(fd0);
                 self.fds_ops.insert(1, FdOperation::Set { to: fd1 });
@@ -207,8 +214,7 @@ impl Engine {
     ) -> anyhow::Result<bool> {
         let mut break_loop = false;
 
-        // Operators which needs addressing next execution cycle
-        // ( that's why we operate on last operator here )
+        // Operators which needs addressing after execution starts
         match parse_result.associated_operator {
             Some(OpType::OrIf) => {
                 if self.execution_successful {

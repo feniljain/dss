@@ -38,7 +38,7 @@ expression: results
         execute_mode: Normal,
         exit_term: false,
         associated_operator: Some(
-            Or,
+            Pipe,
         ),
     },
     ParseResult {
@@ -65,7 +65,7 @@ expression: results
         execute_mode: Normal,
         exit_term: false,
         associated_operator: Some(
-            Or,
+            Pipe,
         ),
     },
     ParseResult {

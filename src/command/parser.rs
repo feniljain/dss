@@ -18,7 +18,7 @@ pub enum OpType {
     RedirectOutput(Option<i32>),
     RedirectInput(Option<i32>),
     OrIf,
-    Or,
+    Pipe,
     AndIf,
     Semicolon,
 }
@@ -160,7 +160,7 @@ impl<'a> Parser<'a> {
                     capture_only_tokens = false;
                 }
                 TokenType::Operator(Operator::Or) => {
-                    parse_result.associated_operator = Some(OpType::Or);
+                    parse_result.associated_operator = Some(OpType::Pipe);
                     break;
                 }
                 TokenType::Operator(Operator::And) => unreachable!(),
@@ -256,7 +256,7 @@ impl Display for OpType {
             OpType::OrIf => "||".into(),
             OpType::Semicolon => ";".into(),
             // OpType::And => "&".into(),
-            OpType::Or => "|".into(),
+            OpType::Pipe => "|".into(),
             // OpType::Exclamation => "!".into(),
             OpType::RedirectOutput(fd_opt) => match fd_opt {
                 Some(fd) => format!("{}, <", fd),
