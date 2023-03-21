@@ -19,14 +19,25 @@ expression: results
                         ),
                     },
                     Token {
-                        lexeme: "-la",
+                        lexeme: "/tmp/",
                         token_type: Word(
                             Text,
                         ),
                         line: 0,
                         range: (
                             3,
-                            5,
+                            7,
+                        ),
+                    },
+                    Token {
+                        lexeme: "doesnotexist",
+                        token_type: Word(
+                            Text,
+                        ),
+                        line: 0,
+                        range: (
+                            9,
+                            20,
                         ),
                     },
                 ],
@@ -34,33 +45,18 @@ expression: results
                 negate_exit_status: false,
                 is_unqualified_path: true,
             },
-            Command {
-                tokens: [
-                    Token {
-                        lexeme: "file.txt",
-                        token_type: Word(
-                            Text,
-                        ),
-                        line: 0,
-                        range: (
-                            11,
-                            18,
-                        ),
-                    },
-                ],
-                path: "file.txt",
-                negate_exit_status: false,
-                is_unqualified_path: true,
-            },
         ],
         execute_mode: Normal,
         exit_term: false,
         associated_operator: Some(
-            RedirectSquirrelOutput(
-                Some(
+            RedirectSquirrelOutput {
+                source: Some(
+                    1,
+                ),
+                target: Some(
                     2,
                 ),
-            ),
+            },
         ),
     },
 ]

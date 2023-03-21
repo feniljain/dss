@@ -26,11 +26,14 @@
 - [X] add support for pipe operators
 - [X] add support for redirect output operator
 - [X] add support for redirect input operator
-- [ ] add support for redirect >> operator
-- [ ] add support for redirect <> operator
-- [ ] add support for redirect >& operator
-- [ ] add support for redirect <& operator
-- [ ] add support for fd in redirect operations
+- [X] add support for redirect >> operator
+- [X] add support for redirect <> operator
+- [X] add support for redirect >& operator
+- [X] add support for redirect <& operator
+- [X] add support for fd in redirect operations
+- [ ] add support for $() in shell
+- [ ] add support for & parsing for job control
+- [ ] add support for another execution mode (job control) in engine
 
 ## Bonus Tasks:
 

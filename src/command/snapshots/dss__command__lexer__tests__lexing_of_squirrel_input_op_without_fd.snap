@@ -4,9 +4,9 @@ expression: lexer.tokens
 ---
 [
     Token {
-        lexeme: "ls",
-        token_type: Word(
-            Text,
+        lexeme: "<&",
+        token_type: Operator(
+            SquirrelInput,
         ),
         line: 0,
         range: (
@@ -15,25 +15,14 @@ expression: lexer.tokens
         ),
     },
     Token {
-        lexeme: "<&",
-        token_type: Operator(
-            SquirrelInput,
-        ),
-        line: 0,
-        range: (
-            3,
-            4,
-        ),
-    },
-    Token {
-        lexeme: "file.txt",
+        lexeme: "1",
         token_type: Word(
             Text,
         ),
         line: 0,
         range: (
-            6,
-            13,
+            2,
+            2,
         ),
     },
 ]

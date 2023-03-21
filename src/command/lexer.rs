@@ -80,11 +80,6 @@ impl Lexer {
                     } else {
                         self.delimit_word_and_add_token();
                         // self.ctx.last_token_type = Some(TokenType::Operator(Operator::And));
-                        /* 3. If the previous character was used as part of an operator and
-                         * the current char cannot be used with the previous chars to
-                         * form an operator, the operator containing the previous char
-                         * shall be delimited.
-                         * */
                         self.add_token("&", TokenType::Operator(Operator::And));
                     }
                 }
@@ -416,26 +411,32 @@ mod tests {
     }
 
     #[test]
-    fn test_lexing_of_squirrel_output_op_diamond_with_fd() {
-        let lexer = check(vec!["ls 2&> file.txt\n"]);
+    fn test_lexing_of_squirrel_output_op_with_fd() {
+        let lexer = check(vec!["ls /tmp/ doesnotexist 2&>1\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 
     #[test]
-    fn test_lexing_of_squirrel_output_op_diamond_without_fd() {
-        let lexer = check(vec!["ls &> file.txt\n"]);
+    fn test_lexing_of_squirrel_output_op_without_fd() {
+        let lexer = check(vec!["ls /tmp/ doesnotexist &>1\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 
     #[test]
-    fn test_lexing_of_squirrel_input_op_diamond_with_fd() {
-        let lexer = check(vec!["ls 2<& file.txt\n"]);
+    fn test_lexing_of_squirrel_input_op_with_fd() {
+        let lexer = check(vec!["0<&1\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 
     #[test]
-    fn test_lexing_of_squirrel_input_op_diamond_without_fd() {
-        let lexer = check(vec!["ls <& file.txt\n"]);
+    fn test_lexing_of_squirrel_input_op_without_fd() {
+        let lexer = check(vec!["<&1\n"]);
+        insta::assert_debug_snapshot!(lexer.tokens);
+    }
+
+    #[test]
+    fn test_lexing_of_bg_process_with_ampersand() {
+        let lexer = check(vec!["ping google.com &\n"]);
         insta::assert_debug_snapshot!(lexer.tokens);
     }
 }

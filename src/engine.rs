@@ -211,49 +211,32 @@ impl Engine {
 
                 self.execution_mode = ExecutionMode::Redirect;
             }
-            Some(OpType::RedirectSquirrelOutput(fd_opt)) => {
+            Some(OpType::RedirectSquirrelOutput { source, target }) => {
                 // Default value: stdout
-                let fd_to_be_set = fd_opt.map_or(1, |fd| fd);
+                let target_fd = target.map_or(1, |fd| fd);
 
-                let last_token = &last_cmd
-                    .tokens
-                    .last()
-                    .expect("expected last token to be present")
-                    .lexeme;
-
-                if last_token == "-" {
-                    self.fds_ops.insert(fd_to_be_set, FdOperation::Close);
-                } else {
-                    let mut flags = OFlag::O_CREAT;
-                    flags.insert(OFlag::O_TRUNC);
-                    flags.insert(OFlag::O_WRONLY);
-
-                    let mut mode = Mode::S_IRUSR;
-                    mode.insert(Mode::S_IWUSR);
-
-                    let file_fd = open(file_path, flags, mode)?;
+                // None means "-", so we need to close
+                // the fd, thats all
+                if let Some(source_fd) = source {
                     self.fds_ops
-                        .insert(fd_to_be_set, FdOperation::Set { to: file_fd });
+                        .insert(source_fd, FdOperation::Set { to: target_fd });
+                } else {
+                    self.fds_ops.insert(target_fd, FdOperation::Close);
                 }
 
                 self.execution_mode = ExecutionMode::Redirect;
             }
-            Some(OpType::RedirectSquirrelInput(fd_opt)) => {
+            Some(OpType::RedirectSquirrelInput{ source, target}) => {
                 // Default value: stdout
-                let fd_to_be_set = fd_opt.map_or(0, |fd| fd);
+                let target_fd = target.map_or(0, |fd| fd);
 
-                let last_token = &last_cmd
-                    .tokens
-                    .last()
-                    .expect("expected last token to be present")
-                    .lexeme;
-
-                if last_token == "-" {
-                    self.fds_ops.insert(fd_to_be_set, FdOperation::Close);
-                } else {
-                    let file_fd = open(file_path, OFlag::O_RDONLY, Mode::S_IRUSR)?;
+                // None means "-", so we need to close
+                // the fd, thats all
+                if let Some(source_fd) = source {
                     self.fds_ops
-                        .insert(fd_to_be_set, FdOperation::Set { to: file_fd });
+                        .insert(source_fd, FdOperation::Set { to: target_fd });
+                } else {
+                    self.fds_ops.insert(target_fd, FdOperation::Close);
                 }
 
                 self.execution_mode = ExecutionMode::Redirect;
@@ -683,13 +666,13 @@ mod tests {
 
     #[test]
     fn test_cmd_execution_of_redirect_squirrel_output() {
-        let engine = check("echo foo &> files2");
-        assert!(engine.execution_successful);
+        let engine = check("ls /tmp/ doesnotexist 2&>1");
+        assert!(!engine.execution_successful);
     }
 
     #[test]
     fn test_cmd_execution_of_redirect_squirrel_input() {
-        let engine = check("echo foo <& files2");
+        let engine = check("echo foo <&2");
         assert!(engine.execution_successful);
     }
 }
