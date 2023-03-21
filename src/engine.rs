@@ -670,9 +670,9 @@ mod tests {
         assert!(!engine.execution_successful);
     }
 
-    // #[test]
-    // fn test_cmd_execution_of_redirect_squirrel_input() {
-    //     let engine = check("echo foo <& files3");
-    //     assert!(engine.execution_successful);
-    // }
+    #[test]
+    fn test_cmd_execution_of_redirect_squirrel_input() {
+        let engine = check("echo foo <&2");
+        assert!(engine.execution_successful);
+    }
 }
