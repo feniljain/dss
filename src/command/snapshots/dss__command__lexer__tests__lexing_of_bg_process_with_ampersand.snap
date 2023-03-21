@@ -4,47 +4,36 @@ expression: lexer.tokens
 ---
 [
     Token {
-        lexeme: "ls",
+        lexeme: "ping",
         token_type: Word(
             Text,
         ),
         line: 0,
         range: (
             0,
-            1,
+            3,
         ),
     },
     Token {
-        lexeme: "2",
+        lexeme: "google.com",
         token_type: Word(
             Text,
         ),
         line: 0,
         range: (
-            3,
-            3,
-        ),
-    },
-    Token {
-        lexeme: "<&",
-        token_type: Operator(
-            SquirrelInput,
-        ),
-        line: 0,
-        range: (
-            4,
             5,
+            14,
         ),
     },
     Token {
-        lexeme: "file.txt",
-        token_type: Word(
-            Text,
+        lexeme: "&",
+        token_type: Operator(
+            And,
         ),
         line: 0,
         range: (
-            7,
-            14,
+            16,
+            16,
         ),
     },
 ]

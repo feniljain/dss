@@ -5,3 +5,4 @@
 - https://www.sarathlakshman.com/2012/09/24/implementation-overview-of-redirection-and-pipe-operators-in-shell
 - https://unix.stackexchange.com/questions/159513/what-are-the-shells-control-and-redirection-operators
 - https://www.howtogeek.com/440848/how-to-run-and-control-background-processes-on-linux/
+- https://wiki.bash-hackers.org/howto/redirection_tutorial
