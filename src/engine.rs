@@ -6,7 +6,7 @@ use nix::{
         stat::Mode,
         wait::{waitpid, WaitStatus},
     },
-    unistd::{chdir, close, dup2, execve, fork, pipe, ForkResult},
+    unistd::{chdir, close, dup2, execve, fork, pipe, setpgid, ForkResult, Pid, getpid},
 };
 use signal_hook::consts;
 
@@ -355,6 +355,10 @@ impl Engine {
             Ok(ForkResult::Parent {
                 child: child_pid, ..
             }) => {
+                if matches!(self.execution_mode, ExecutionMode::Background) {
+                        setpgid(child_pid, child_pid)?;
+                }
+
                 for (fd, value) in &self.fds_ops {
                     match value {
                         FdOperation::Set { to } => {
@@ -407,6 +411,11 @@ impl Engine {
             }
             Ok(ForkResult::Child) => match execute_mode {
                 ExecuteMode::Normal => {
+                    if matches!(self.execution_mode, ExecutionMode::Background) {
+                        let pgrp = getpid();
+                        setpgid(Pid::from_raw(0), pgrp)?;
+                    }
+
                     let command =
                         command.expect("internal error: should have contained valid command");
 
