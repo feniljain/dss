@@ -690,4 +690,10 @@ mod tests {
         let engine = check("echo foo <&2");
         assert!(engine.execution_successful);
     }
+
+    #[test]
+    fn test_cmd_execution_of_bg_processes() {
+        let engine = check("ping google.com &");
+        assert!(engine.execution_successful);
+    }
 }
