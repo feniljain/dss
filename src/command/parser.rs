@@ -45,6 +45,7 @@ pub enum OpType {
     Pipe,
     AndIf,
     Semicolon,
+    Background,
 }
 
 #[derive(Debug)]
@@ -322,7 +323,10 @@ impl<'a> Parser<'a> {
                     parse_result.associated_operator = Some(OpType::Pipe);
                     break;
                 }
-                TokenType::Operator(Operator::And) => unreachable!(),
+                TokenType::Operator(Operator::And) => {
+                    parse_result.associated_operator = Some(OpType::Background);
+                    break;
+                },
                 TokenType::Backslash => {}
             }
         }
@@ -464,6 +468,9 @@ impl Display for OpType {
 
                 format!("{}&>{}", target_fd_str, source_fd_str)
             }
+            OpType::Background => {
+                format!("&")
+            },
         };
 
         write!(f, "{}", variant_str)
@@ -649,8 +656,8 @@ mod tests {
 
     #[test]
     fn test_cmd_parsing_for_bg_process_invocation() {
-        // let lexer = get_tokens("ls -la <& file.txt\n").expect("lexer failed, check lexer tests");
-        // let results = check(&lexer.tokens).expect("parser failed :(");
-        // insta::assert_debug_snapshot!(results);
+        let lexer = get_tokens("ping google.com &\n").expect("lexer failed, check lexer tests");
+        let results = check(&lexer.tokens).expect("parser failed :(");
+        insta::assert_debug_snapshot!(results);
     }
 }

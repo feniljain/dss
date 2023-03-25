@@ -6,3 +6,4 @@
 - https://unix.stackexchange.com/questions/159513/what-are-the-shells-control-and-redirection-operators
 - https://www.howtogeek.com/440848/how-to-run-and-control-background-processes-on-linux/
 - https://wiki.bash-hackers.org/howto/redirection_tutorial
+- https://stackoverflow.com/questions/8319484/regarding-background-processes-using-fork-and-child-processes-in-my-dummy-shel

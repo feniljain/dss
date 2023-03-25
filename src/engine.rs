@@ -58,6 +58,7 @@ enum ExecutionMode {
     Subshell,
     Pipeline,
     Redirect,
+    Background,
 }
 
 impl Engine {
@@ -226,7 +227,7 @@ impl Engine {
 
                 self.execution_mode = ExecutionMode::Redirect;
             }
-            Some(OpType::RedirectSquirrelInput{ source, target}) => {
+            Some(OpType::RedirectSquirrelInput { source, target }) => {
                 // Default value: stdout
                 let target_fd = target.map_or(0, |fd| fd);
 
@@ -246,6 +247,9 @@ impl Engine {
                 set_stdin_to = Some(fd0);
                 self.fds_ops.insert(1, FdOperation::Set { to: fd1 });
                 self.execution_mode = ExecutionMode::Pipeline;
+            }
+            Some(OpType::Background) => {
+                self.execution_mode = ExecutionMode::Background;
             }
             _ => {}
         }
@@ -376,7 +380,9 @@ impl Engine {
                 //
                 // TIP: While debugging piping related issues, comment this if
                 // condition and let it wait on each command execution
-                if !matches!(self.execution_mode, ExecutionMode::Pipeline) {
+                if !matches!(self.execution_mode, ExecutionMode::Pipeline)
+                    && !matches!(self.execution_mode, ExecutionMode::Background)
+                {
                     let wait_status = waitpid(child_pid, None).expect(&format!(
                         "Expected to wait for child with pid: {:?}",
                         child_pid
