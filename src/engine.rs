@@ -6,7 +6,7 @@ use nix::{
         stat::Mode,
         wait::{waitpid, WaitStatus},
     },
-    unistd::{chdir, close, dup2, execve, fork, pipe, setpgid, ForkResult, Pid, getpid},
+    unistd::{chdir, close, dup2, execve, fork, getpid, pipe, setpgid, ForkResult, Pid},
 };
 use signal_hook::consts;
 
@@ -14,6 +14,7 @@ use std::{
     collections::HashMap,
     convert::Infallible,
     ffi::{CStr, CString},
+    fmt::{Display, Formatter},
     io,
     os::unix::prelude::OsStrExt,
     path::{Path, PathBuf},
@@ -35,7 +36,41 @@ use crate::{
     frontend::{write_error_to_shell, write_to_stderr, write_to_stdout, Prompt},
 };
 
-const BUILTIN_COMMANDS: [&str; 2] = ["cd", "exec"];
+const BUILTIN_COMMANDS: [&str; 3] = ["cd", "exec", "jobs"];
+
+#[derive(Clone, Debug)]
+pub enum ProcessStatus {
+    Running,
+    Suspended
+}
+
+impl Display for ProcessStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProcessStatus::Running => write!(f, "running"),
+            ProcessStatus::Suspended => write!(f, "suspended"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Process {
+    pid: Pid,
+    cmd: String,
+    status: ProcessStatus,
+}
+
+impl Process {
+    fn new(pid: Pid, cmd: String, status: ProcessStatus) -> Self {
+        Process { pid, cmd, status }
+    }
+}
+
+impl Display for Process {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {} {}", self.pid, self.status, self.cmd)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Engine {
@@ -44,6 +79,7 @@ pub struct Engine {
     execution_mode: ExecutionMode,
     // Operations to be done on different `fd`s
     fds_ops: HashMap<i32, FdOperation>,
+    pub job_processes: Vec<Process>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -68,6 +104,7 @@ impl Engine {
             env_paths: parse_paths(),
             execution_mode: ExecutionMode::Normal,
             fds_ops: HashMap::new(),
+            job_processes: Vec::new(),
         }
     }
 
@@ -341,6 +378,17 @@ impl Engine {
                 self.parse_and_execute(&command.tokens)?;
                 Ok(())
             }
+            "jobs" => {
+                self.job_processes
+                    .iter()
+                    .enumerate()
+                    .for_each(|(idx, process)| {
+                        // FIXME: use panic safe write_to_stdout here
+                        println!("{} {}", idx, process);
+                    });
+
+                Ok(())
+            }
             _ => Err(ShellError::CommandNotFound(cmd_str.to_string()).into()),
         }
     }
@@ -356,7 +404,10 @@ impl Engine {
                 child: child_pid, ..
             }) => {
                 if matches!(self.execution_mode, ExecutionMode::Background) {
-                        setpgid(child_pid, child_pid)?;
+                    setpgid(child_pid, child_pid)?;
+                    let command = command.expect("invalid state: should have had command in background process execution flow");
+                    self.job_processes
+                        .push(Process::new(child_pid, command.as_string(), ProcessStatus::Running));
                 }
 
                 for (fd, value) in &self.fds_ops {

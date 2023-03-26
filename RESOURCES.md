@@ -7,3 +7,5 @@
 - https://www.howtogeek.com/440848/how-to-run-and-control-background-processes-on-linux/
 - https://wiki.bash-hackers.org/howto/redirection_tutorial
 - https://stackoverflow.com/questions/8319484/regarding-background-processes-using-fork-and-child-processes-in-my-dummy-shel
+- Job Control Signals: https://www.gnu.org/software/libc/manual/html_node/Job-Control-Signals.html
+- Implementing a Job Control Shell: https://www.andrew.cmu.edu/course/15-310/applications/homework/homework4/lab4.pdf
