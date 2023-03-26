@@ -232,7 +232,8 @@ impl Lexer {
         let last_token_opt = self.tokens.last();
         match last_token_opt {
             Some(last_token) => {
-                !matches!(last_token.token_type, TokenType::Operator(_))
+                (matches!(last_token.token_type, TokenType::Operator(Operator::And))
+                    || !matches!(last_token.token_type, TokenType::Operator(_)))
                     && !matches!(last_token.token_type, TokenType::Backslash)
             }
             None => false,
