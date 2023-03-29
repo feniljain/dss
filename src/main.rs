@@ -10,7 +10,7 @@ use engine::Engine;
 // FIXME: Refine APIs exposed by Engine and Command
 
 fn main() -> anyhow::Result<()> {
-    let mut engine = Engine::new();
+    let mut engine = Engine::new()?;
 
     engine.fire_on()?;
 

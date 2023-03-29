@@ -10,6 +10,8 @@ pub enum ShellError {
     LexError(LexError),
     #[error("dss: internal error [BUG]: {0}\n")]
     InternalError(String),
+    #[error("dss: engine error: {0}\n")]
+    EngineError(String),
 }
 
 #[derive(Error, Debug)]

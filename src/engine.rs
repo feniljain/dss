@@ -6,7 +6,7 @@ use nix::{
         stat::Mode,
         wait::{waitpid, WaitStatus},
     },
-    unistd::{chdir, close, dup2, execve, fork, getpid, pipe, setpgid, ForkResult, Pid},
+    unistd::{chdir, close, dup2, execve, fork, getpid, isatty, pipe, setpgid, ForkResult, Pid, tcsetpgrp},
 };
 use signal_hook::consts;
 
@@ -36,19 +36,20 @@ use crate::{
     frontend::{write_error_to_shell, write_to_stderr, write_to_stdout, Prompt},
 };
 
-const BUILTIN_COMMANDS: [&str; 3] = ["cd", "exec", "jobs"];
+const BUILTIN_COMMANDS: [&str; 4] = ["cd", "exec", "jobs", "fg"];
 
 #[derive(Clone, Debug)]
 pub enum ProcessStatus {
     Running,
-    Suspended
+    // Suspended
+    // Done,
 }
 
 impl Display for ProcessStatus {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             ProcessStatus::Running => write!(f, "running"),
-            ProcessStatus::Suspended => write!(f, "suspended"),
+            // ProcessStatus::Suspended => write!(f, "suspended"),
         }
     }
 }
@@ -72,6 +73,11 @@ impl Display for Process {
     }
 }
 
+// #[derive(Clone, Debug)]
+// pub struct Job {
+//     processes: Vec<Process>
+// }
+
 #[derive(Clone, Debug)]
 pub struct Engine {
     pub execution_successful: bool,
@@ -79,7 +85,8 @@ pub struct Engine {
     execution_mode: ExecutionMode,
     // Operations to be done on different `fd`s
     fds_ops: HashMap<i32, FdOperation>,
-    pub job_processes: Vec<Process>,
+    job_processes: Vec<Process>,
+    tty_fd: i32,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -98,14 +105,46 @@ enum ExecutionMode {
 }
 
 impl Engine {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> anyhow::Result<Self> {
+        let tty_fd;
+        match open("/dev/tty", OFlag::O_RDWR, Mode::S_IRWXU) {
+            Ok(fd) => {
+                tty_fd = fd;
+            }
+            Err(_) => {
+                // Comment from busybox:
+                /* BTW, bash will try to open(ttyname(0)) if open("/dev/tty") fails.
+                 * That sometimes helps to acquire controlling tty.
+                 * Obviously, a workaround for bugs when someone
+                 * failed to provide a controlling tty to bash! :) */
+
+                let mut fd = 2;
+
+                loop {
+                    if isatty(fd)? {
+                        tty_fd = fd;
+                        break;
+                    }
+
+                    fd -= 1;
+                    if fd < 0 {
+                        return Err(ShellError::EngineError(
+                            "can't access tty; job control turned off".into(),
+                        )
+                        .into());
+                    }
+                }
+            }
+        }
+
+        Ok(Self {
             execution_successful: true,
             env_paths: parse_paths(),
             execution_mode: ExecutionMode::Normal,
             fds_ops: HashMap::new(),
             job_processes: Vec::new(),
-        }
+            tty_fd,
+        })
     }
 
     pub fn fire_on(&mut self) -> anyhow::Result<()> {
@@ -389,6 +428,20 @@ impl Engine {
 
                 Ok(())
             }
+            "fg" => {
+                let pgrp = match self.job_processes.first() {
+                    Some(first_process) => {
+                        println!("first process pid: {}", first_process.pid);
+                        first_process.pid
+                    }
+                    None => {
+                        getpid()
+                    }
+                };
+
+                tcsetpgrp(self.tty_fd, pgrp)?;
+                Ok(())
+            }
             _ => Err(ShellError::CommandNotFound(cmd_str.to_string()).into()),
         }
     }
@@ -406,8 +459,11 @@ impl Engine {
                 if matches!(self.execution_mode, ExecutionMode::Background) {
                     setpgid(child_pid, child_pid)?;
                     let command = command.expect("invalid state: should have had command in background process execution flow");
-                    self.job_processes
-                        .push(Process::new(child_pid, command.as_string(), ProcessStatus::Running));
+                    self.job_processes.push(Process::new(
+                        child_pid,
+                        command.as_string(),
+                        ProcessStatus::Running,
+                    ));
                 }
 
                 for (fd, value) in &self.fds_ops {
@@ -590,7 +646,8 @@ mod tests {
     }
 
     fn check(input_str: &str) -> Engine {
-        let mut engine = Engine::new();
+        let mut engine =
+            Engine::new().expect("engine should have been able to be created successfully");
 
         let ip_str = input_str.to_string() + "\n";
         let lexer = get_tokens(&ip_str).expect("lexer failed, check lexer tests");
