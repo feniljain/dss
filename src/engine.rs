@@ -6,7 +6,9 @@ use nix::{
         stat::Mode,
         wait::{waitpid, WaitStatus},
     },
-    unistd::{chdir, close, dup2, execve, fork, getpid, isatty, pipe, setpgid, ForkResult, Pid, tcsetpgrp},
+    unistd::{
+        chdir, close, dup2, execve, fork, getpid, isatty, pipe, setpgid, tcsetpgrp, ForkResult, Pid,
+    },
 };
 use signal_hook::consts;
 
@@ -73,19 +75,30 @@ impl Display for Process {
     }
 }
 
-// #[derive(Clone, Debug)]
-// pub struct Job {
-//     processes: Vec<Process>
-// }
+#[derive(Clone, Debug)]
+pub struct Job {
+    processes: Vec<Process>,
+    pgrp: Pid,
+}
+
+impl Job {
+    fn new() -> Self {
+        Self {
+            processes: Vec::new(),
+            pgrp: Pid::from_raw(0),
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Engine {
     pub execution_successful: bool,
     pub env_paths: Vec<String>,
     execution_mode: ExecutionMode,
+    pub is_interactive: bool,
     // Operations to be done on different `fd`s
     fds_ops: HashMap<i32, FdOperation>,
-    job_processes: Vec<Process>,
+    job: Job,
     tty_fd: i32,
 }
 
@@ -105,45 +118,17 @@ enum ExecutionMode {
 }
 
 impl Engine {
-    pub fn new() -> anyhow::Result<Self> {
-        let tty_fd;
-        match open("/dev/tty", OFlag::O_RDWR, Mode::S_IRWXU) {
-            Ok(fd) => {
-                tty_fd = fd;
-            }
-            Err(_) => {
-                // Comment from busybox:
-                /* BTW, bash will try to open(ttyname(0)) if open("/dev/tty") fails.
-                 * That sometimes helps to acquire controlling tty.
-                 * Obviously, a workaround for bugs when someone
-                 * failed to provide a controlling tty to bash! :) */
-
-                let mut fd = 2;
-
-                loop {
-                    if isatty(fd)? {
-                        tty_fd = fd;
-                        break;
-                    }
-
-                    fd -= 1;
-                    if fd < 0 {
-                        return Err(ShellError::EngineError(
-                            "can't access tty; job control turned off".into(),
-                        )
-                        .into());
-                    }
-                }
-            }
-        }
+    pub fn new(is_interactive: bool) -> anyhow::Result<Self> {
+        let tty_fd = get_tty_fd()?;
 
         Ok(Self {
             execution_successful: true,
             env_paths: parse_paths(),
             execution_mode: ExecutionMode::Normal,
             fds_ops: HashMap::new(),
-            job_processes: Vec::new(),
+            job: Job::new(),
             tty_fd,
+            is_interactive,
         })
     }
 
@@ -418,7 +403,8 @@ impl Engine {
                 Ok(())
             }
             "jobs" => {
-                self.job_processes
+                self.job
+                    .processes
                     .iter()
                     .enumerate()
                     .for_each(|(idx, process)| {
@@ -429,16 +415,24 @@ impl Engine {
                 Ok(())
             }
             "fg" => {
-                let pgrp = match self.job_processes.first() {
+                let pgrp = match self.job.processes.first() {
                     Some(first_process) => {
                         println!("first process pid: {}", first_process.pid);
                         first_process.pid
                     }
-                    None => {
-                        getpid()
-                    }
+                    None => getpid(),
                 };
 
+                let curr_pid = getpid();
+                println!(
+                    "pid received from getpid for shell in foreground: {}",
+                    curr_pid
+                );
+
+                // let curr_tty_pid = tcgetattr(self.tty_fd)?;
+                // curr_tty_pid.
+
+                println!("TTY FD: {}", self.tty_fd);
                 tcsetpgrp(self.tty_fd, pgrp)?;
                 Ok(())
             }
@@ -456,15 +450,24 @@ impl Engine {
             Ok(ForkResult::Parent {
                 child: child_pid, ..
             }) => {
-                if matches!(self.execution_mode, ExecutionMode::Background) {
-                    setpgid(child_pid, child_pid)?;
-                    let command = command.expect("invalid state: should have had command in background process execution flow");
-                    self.job_processes.push(Process::new(
+                if self.is_interactive {
+                    if self.job.processes.len() == 0 {
+                        self.job.pgrp = child_pid;
+                    }
+
+                    let command = command.expect(
+                        "invalid state: should have had command in background process execution flow",
+                    );
+                    self.job.processes.push(Process::new(
                         child_pid,
                         command.as_string(),
                         ProcessStatus::Running,
                     ));
+
+                    setpgid(child_pid, self.job.pgrp)?;
                 }
+                // if matches!(self.execution_mode, ExecutionMode::Background) {
+                // }
 
                 for (fd, value) in &self.fds_ops {
                     match value {
@@ -493,6 +496,7 @@ impl Engine {
                 // condition and let it wait on each command execution
                 if !matches!(self.execution_mode, ExecutionMode::Pipeline)
                     && !matches!(self.execution_mode, ExecutionMode::Background)
+                    && !self.is_interactive
                 {
                     let wait_status = waitpid(child_pid, None).expect(&format!(
                         "Expected to wait for child with pid: {:?}",
@@ -516,34 +520,49 @@ impl Engine {
                     }
                 }
             }
-            Ok(ForkResult::Child) => match execute_mode {
-                ExecuteMode::Normal => {
-                    if matches!(self.execution_mode, ExecutionMode::Background) {
-                        let pgrp = getpid();
-                        setpgid(Pid::from_raw(0), pgrp)?;
-                    }
+            Ok(ForkResult::Child) => {
+                self.tty_fd = get_tty_fd()?;
+                match execute_mode {
+                    ExecuteMode::Normal => {
+                        if self.is_interactive {
+                            let curr_pid = getpid();
 
-                    let command =
-                        command.expect("internal error: should have contained valid command");
-
-                    for (fd, op) in &self.fds_ops {
-                        match op {
-                            FdOperation::Set { to } => {
-                                dup2(*to, *fd)?;
-                                close(*to)?;
+                            if self.job.processes.len() == 0 {
+                                // first process
+                                self.job.pgrp = curr_pid;
                             }
-                            FdOperation::Close => {
-                                close(*fd)?;
+
+                            println!("pgrp: {}", self.job.pgrp);
+                            // passing frist as 0, makes it take it's own
+                            // pid by default
+                            setpgid(curr_pid, self.job.pgrp)?;
+                        }
+                        // tcsetpgrp(self.tty_fd, pgrp)?;
+
+                        // if matches!(self.execution_mode, ExecutionMode::Background) {}
+
+                        let command =
+                            command.expect("internal error: should have contained valid command");
+
+                        for (fd, op) in &self.fds_ops {
+                            match op {
+                                FdOperation::Set { to } => {
+                                    dup2(*to, *fd)?;
+                                    close(*to)?;
+                                }
+                                FdOperation::Close => {
+                                    close(*fd)?;
+                                }
                             }
                         }
-                    }
 
-                    execute_external_cmd(command.clone(), self.env_paths.clone())?;
+                        execute_external_cmd(command.clone(), self.env_paths.clone())?;
+                    }
+                    ExecuteMode::Subshell(tokens) => {
+                        self.parse_and_execute(&tokens)?;
+                    }
                 }
-                ExecuteMode::Subshell(tokens) => {
-                    self.parse_and_execute(&tokens)?;
-                }
-            },
+            }
             Err(err) => panic!("Fork failed: {err:?}"),
         }
 
@@ -629,6 +648,42 @@ fn parse_paths() -> Vec<String> {
         .collect();
 }
 
+fn get_tty_fd() -> anyhow::Result<i32> {
+    let tty_fd;
+
+    match open("/dev/tty", OFlag::O_RDWR, Mode::S_IRWXU) {
+        Ok(fd) => {
+            tty_fd = fd;
+        }
+        Err(_) => {
+            // Comment from busybox:
+            /* BTW, bash will try to open(ttyname(0)) if open("/dev/tty") fails.
+             * That sometimes helps to acquire controlling tty.
+             * Obviously, a workaround for bugs when someone
+             * failed to provide a controlling tty to bash! :) */
+
+            let mut fd = 2;
+
+            loop {
+                if isatty(fd)? {
+                    tty_fd = fd;
+                    break;
+                }
+
+                fd -= 1;
+                if fd < 0 {
+                    return Err(ShellError::EngineError(
+                        "can't access tty; job control turned off".into(),
+                    )
+                    .into());
+                }
+            }
+        }
+    }
+
+    Ok(tty_fd)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::command::lexer::Lexer;
@@ -646,8 +701,9 @@ mod tests {
     }
 
     fn check(input_str: &str) -> Engine {
-        let mut engine =
-            Engine::new().expect("engine should have been able to be created successfully");
+        let is_interactive = true;
+        let mut engine = Engine::new(is_interactive)
+            .expect("engine should have been able to be created successfully");
 
         let ip_str = input_str.to_string() + "\n";
         let lexer = get_tokens(&ip_str).expect("lexer failed, check lexer tests");
