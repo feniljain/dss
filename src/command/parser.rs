@@ -117,10 +117,10 @@ impl<'a> Parser<'a> {
                     parse_result.associated_operator = Some(OpType::AndIf);
                     break;
                 }
-                TokenType::Operator(Operator::Semicolon) => {
-                    parse_result.associated_operator = Some(OpType::Semicolon);
-                    break;
-                }
+                // TokenType::Operator(Operator::Semicolon) => {
+                //     parse_result.associated_operator = Some(OpType::Semicolon);
+                //     break;
+                // }
                 TokenType::Operator(Operator::Exclamation) => {
                     if !first_token {
                         return Err(
@@ -328,6 +328,7 @@ impl<'a> Parser<'a> {
                     break;
                 },
                 TokenType::Backslash => {}
+                TokenType::Semicolon => todo!(),
             }
         }
 
