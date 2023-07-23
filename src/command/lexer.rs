@@ -1,17 +1,26 @@
+// Tokenization Spec:
+// - URL: https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18_03
+// I hoped to implement this :sadge:
+
+use std::{iter::Peekable, str::Chars};
+
 use crate::errors::{LexError, ShellError};
 
 use super::token::{Keyword, Operator, Token, TokenType, Word};
 
 pub struct Lexer {
+    // TODO: Remove tokens field
     pub tokens: Vec<Token>,
-    ctx: LexingContext,
+    // ctx: LexingContext<'a>,
 }
 
-struct LexingContext {
+struct LexingContext<'a> {
     line: usize,
+    chars: Peekable<Chars<'a>>,
     // offset from new line
     offset: usize,
-    last_token_type: Option<TokenType>,
+    tokens: Vec<Token>,
+    // last_token_type: Option<TokenType>,
     word: String,
 }
 
@@ -19,158 +28,167 @@ impl Lexer {
     pub fn new() -> Self {
         Self {
             tokens: vec![],
-            ctx: LexingContext {
-                line: 0,
-                offset: 0,
-                last_token_type: None,
-                word: String::new(),
-            },
+            // ctx: LexingContext {
+            //     line: 0,
+            //     chars: "c".chars().peekable(),
+            //     offset: 0,
+            //     word: String::new(),
+            //     tokens: &mut vec![],
+            // },
         }
     }
 
-    // Tokenization Spec:
-    // - URL: https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18_03
-    // - SECTION: 2.3 Token Recognition
-    pub fn scan(&mut self, input_str: &str) -> anyhow::Result<&Vec<Token>> {
-        assert!(!self.complete_processing());
-        // This clone becomes necessary cause otherwise,
-        // if we take mutable borrow of this iterator
-        // Rust thinks that add_token mutates `self`,
-        // causing two mutable borrows, tho we know in
-        // reality we don't
-        //
-        // partial borrows only work in same function,
-        // not across function boundaries
-        let mut itr = input_str.chars().peekable();
+    pub fn scan(&mut self, input_str: &str) -> anyhow::Result<Vec<Token>> {
+        let mut ctx = LexingContext {
+            line: 0,
+            chars: input_str.chars().peekable(),
+            offset: 0,
+            tokens: vec![],
+            word: String::new(),
+        };
 
-        // This case can only occur when
-        // scan is called again while
-        // processing multiline cmds
-        if self.tokens.len() > 0 {
-            self.ctx.line += 1;
-            self.ctx.offset = 0;
+        ctx.scan()?;
+        Ok(ctx.tokens)
+    }
+
+    pub fn complete_processing(&self, last_token: Token) -> bool {
+        // if it's backslash -> not completed processing
+        // if it's any operator other than & -> not completed processing
+
+        if matches!(last_token.token_type, TokenType::Backslash) {
+            return false;
         }
 
-        while let Some(ch) = itr.next() {
+        if matches!(last_token.token_type, TokenType::Operator(_))
+            && !matches!(last_token.token_type, TokenType::Operator(Operator::And))
+        {
+            return false;
+        }
+
+        return true;
+    }
+}
+
+impl<'a> LexingContext<'a> {
+    pub fn scan(&mut self) -> anyhow::Result<()> {
+        while let Some(ch) = self.eat() {
             match ch {
                 '\n' => {
-                    // FIXME:
-                    /*
-                     * 1. If the end of input is recognized, the current token (if any)
-                     * shall be delimited.
-                     */
-                    self.delimit_word_and_add_token();
-
-                    self.ctx.line += 1;
-                    self.ctx.offset = 0;
+                    self.line += 1;
+                    self.offset = 0;
+                    self.word = String::new();
                 }
-                /* 2. If the previous character was used as part of an operator and the
-                 * current character is not quoted and can be used with the previous chars
-                 * to form an operator, it shall be used as part of that (operator) token.
-                 */
                 '&' => {
-                    if let Some(TokenType::Operator(Operator::And)) = &self.ctx.last_token_type {
-                        self.tokens.pop();
-                        self.add_token("&&", TokenType::Operator(Operator::AndIf));
-                    } else if let Some(TokenType::Operator(Operator::LeftPointyBracket)) =
-                        &self.ctx.last_token_type
-                    {
-                        self.tokens.pop();
-                        self.add_token("<&", TokenType::Operator(Operator::SquirrelInput));
+                    let next_char = self.peek();
+                    if next_char == Some(&'&') {
+                        self.eat();
+                        self.add_token(TokenType::Operator(Operator::AndIf));
+                    } else if next_char == Some(&'>') {
+                        self.eat();
+                        self.add_token(TokenType::Operator(Operator::SquirrelOutput));
                     } else {
-                        self.delimit_word_and_add_token();
-                        // self.ctx.last_token_type = Some(TokenType::Operator(Operator::And));
-                        self.add_token("&", TokenType::Operator(Operator::And));
+                        self.add_token(TokenType::Operator(Operator::And));
                     }
                 }
                 '|' => {
-                    if let Some(TokenType::Operator(Operator::Or)) = &self.ctx.last_token_type {
-                        self.tokens.pop();
-                        self.add_token("||", TokenType::Operator(Operator::OrIf));
+                    if self.peek() == Some(&'|') {
+                        self.eat();
+                        self.add_token(TokenType::Operator(Operator::OrIf));
                     } else {
-                        self.delimit_word_and_add_token();
-                        // self.ctx.last_token_type = Some(TokenType::Operator(Operator::Or));
-                        self.add_token("|", TokenType::Operator(Operator::Or));
+                        self.add_token(TokenType::Operator(Operator::Or));
                     }
                 }
                 ';' => {
-                    self.delimit_word_and_add_token();
-                    self.add_token(";", TokenType::Operator(Operator::Semicolon));
+                    self.add_token(TokenType::Semicolon);
                 }
-
-                '!' => self.add_token("!", TokenType::Operator(Operator::Exclamation)),
-                '(' => self.add_token("(", TokenType::LeftParen),
+                '!' => self.add_token(TokenType::Operator(Operator::Exclamation)),
+                '(' => self.add_token(TokenType::LeftParen),
                 ')' => {
-                    self.delimit_word_and_add_token();
-                    self.add_token(")", TokenType::RightParen);
+                    self.add_token(TokenType::RightParen);
                 }
                 '\\' => {
-                    self.delimit_word_and_add_token();
-                    self.add_token("\\", TokenType::Backslash);
+                    self.add_token(TokenType::Backslash);
                 }
                 '<' => {
-                    self.delimit_word_and_add_token();
-                    self.add_token("<", TokenType::Operator(Operator::LeftPointyBracket));
+                    let next_char = self.peek();
+                    if next_char == Some(&'>') {
+                        self.eat();
+                       self.add_token(TokenType::Operator(Operator::DiamondPointyBrackets));
+                    } else if next_char == Some(&'&') {
+                        self.eat();
+                        self.add_token(TokenType::Operator(Operator::SquirrelInput));
+                    } else {
+                        self.add_token(TokenType::Operator(Operator::LeftPointyBracket));
+                    }
                 }
                 '>' => {
-                    if let Some(TokenType::Operator(Operator::RightPointyBracket)) =
-                        &self.ctx.last_token_type
-                    {
-                        self.tokens.pop();
-                        self.add_token(
-                            ">>",
-                            TokenType::Operator(Operator::DoubleRightPointyBracket),
-                        );
-                    } else if let Some(TokenType::Operator(Operator::LeftPointyBracket)) =
-                        &self.ctx.last_token_type
-                    {
-                        self.tokens.pop();
-                        self.add_token("<>", TokenType::Operator(Operator::DiamondPointyBrackets));
-                    } else if let Some(TokenType::Operator(Operator::And)) =
-                        &self.ctx.last_token_type
-                    {
-                        self.tokens.pop();
-                        self.add_token("&>", TokenType::Operator(Operator::SquirrelOutput));
+                    let next_char = self.peek();
+                    if next_char == Some(&'>') {
+                        self.eat();
+                        self.add_token(TokenType::Operator(Operator::DoubleRightPointyBracket));
                     } else {
-                        self.delimit_word_and_add_token();
-                        self.add_token(">", TokenType::Operator(Operator::RightPointyBracket));
+                        self.add_token(TokenType::Operator(Operator::RightPointyBracket));
                     }
                 }
-                ' ' => self.delimit_word_and_add_token(),
+                ' ' => {
+                    // We want to clear the word cause otherwise it will
+                    // contain space as a char
+                    self.word = String::new();
+                }
+                ch if is_valid_name_char(ch) => {
+                    self.eat_while(is_valid_name_char);
+                    let token_type = match self.word.as_str() {
+                        "exit" => TokenType::Word(Word::Keyword(Keyword::Exit)),
+                        _ => TokenType::Word(Word::Text),
+                    };
+                    self.add_token(token_type);
+                }
                 _ => {
-                    if is_valid_name_char(ch) {
-                        self.ctx.word.push(ch);
-                    } else {
-                        return Err(ShellError::LexError(LexError::SyntaxError {
-                            message: "unexpected character".to_string(),
-                            line: self.ctx.line,
-                            range: (self.ctx.offset, self.ctx.offset + 1),
-                        })
-                        .into());
-                    }
+                    return Err(ShellError::LexError(LexError::SyntaxError {
+                        message: "unexpected character".to_string(),
+                        line: self.line,
+                        range: (self.offset, self.offset + 1),
+                    })
+                    .into())
                 }
             }
-            self.ctx.offset += 1;
         }
 
-        Ok(&self.tokens)
+        Ok(())
     }
 
-    fn delimit_word_and_add_token(&mut self) {
-        let token_type = match self.ctx.word.as_str() {
-            "exit" => TokenType::Word(Word::Keyword(Keyword::Exit)),
-            _ => TokenType::Word(Word::Text),
+    fn eat_while(&mut self, predicate: impl Fn(char) -> bool) {
+        loop {
+            let Some(ch) = self.chars.peek() else {
+                break;
+            };
+
+            if !predicate(*ch) {
+                break;
+            }
+
+            self.eat();
+        }
+    }
+
+    fn eat(&mut self) -> Option<char> {
+        let Some(ch) = self.chars.next() else {
+            return None;
         };
 
-        self.ctx.last_token_type = Some(token_type.clone());
-        self.add_token(self.ctx.word.clone(), token_type);
-        self.ctx.word = String::new();
+        self.word.push(ch);
+        self.offset += 1;
+        return Some(ch);
     }
 
-    fn add_token<T: Into<String>>(&mut self, lexeme: T, token_type: TokenType) {
-        let lexeme: String = lexeme.into();
+    fn peek(&mut self) -> Option<&char> {
+        self.chars.peek()
+    }
+
+    fn add_token(&mut self, token_type: TokenType) {
+        // let lexeme: String = lexeme.into();
+        let lexeme = &self.word;
         let len = lexeme.len();
-        self.ctx.last_token_type = Some(token_type.clone());
 
         /*
          * If it is indicated that a token is delimited, and no characters have been included
@@ -180,64 +198,41 @@ impl Lexer {
             return;
         }
 
-        let mut start_offset = self.ctx.offset;
-        let mut end_offset = self.ctx.offset;
+        // let mut start_offset = self.offset;
+        // let mut end_offset = self.offset;
+        let start_offset = self.offset - len;
+        let end_offset = self.offset - 1;
 
-        match &token_type {
-            TokenType::Word(_) => {
-                // For words, we either delimit them on space or newline
-                // so the offsets received are of the space or newline char
-                //
-                // ls
-                //   ^
-                //   offset point received
-                //
-                // This is the reason we remove `len` from offset
-                // for starting point
-                //
-                // And we just remove 1 for ending point
-                start_offset -= len;
-                end_offset -= 1;
-            }
-            // TokenType::LeftPointyBracket(fd_opt) | TokenType::RightPointyBracket(fd_opt) => {
-            //     if let Some(fd) = fd_opt {
-            //         start_offset -= fd.to_string().len();
-            //     }
-            // }
-            _ => {
-                // For other tokens, we evaluated them
-                // as soon we find them, we do not wait to
-                // delimit like words, so receive offset at
-                //
-                // &&
-                //  ^
-                //  offset point received
-                //
-                //  This is the reason we take the space till
-                //  len - 1
-                start_offset -= len - 1;
-            }
-        }
+        //match &token_type {
+        //    TokenType::Word(_) => {}
+        //    // TokenType::LeftPointyBracket(fd_opt) | TokenType::RightPointyBracket(fd_opt) => {
+        //    //     if let Some(fd) = fd_opt {
+        //    //         start_offset -= fd.to_string().len();
+        //    //     }
+        //    // }
+        //    _ => {
+        //        // For other tokens, we evaluated them
+        //        // as soon we find them, we do not wait to
+        //        // delimit like words, so receive offset at
+        //        //
+        //        // &&
+        //        //  ^
+        //        //  offset point received
+        //        //
+        //        //  This is the reason we take the space till
+        //        //  len - 1
+        //        start_offset -= len - 1;
+        //    }
+        //}
 
         let token = Token {
-            lexeme,
+            lexeme: lexeme.to_string(),
             token_type,
-            line: self.ctx.line,
+            line: self.line,
             range: (start_offset, end_offset),
         };
         self.tokens.push(token);
-    }
-
-    pub fn complete_processing(&self) -> bool {
-        let last_token_opt = self.tokens.last();
-        match last_token_opt {
-            Some(last_token) => {
-                (matches!(last_token.token_type, TokenType::Operator(Operator::And))
-                    || !matches!(last_token.token_type, TokenType::Operator(_)))
-                    && !matches!(last_token.token_type, TokenType::Backslash)
-            }
-            None => false,
-        }
+        self.word = String::new();
     }
 }
 
@@ -272,14 +267,12 @@ fn is_alpha(ch: char) -> bool {
 mod tests {
     use super::*;
 
-    fn check(input_strs: Vec<&str>) -> Lexer {
+    fn check(input_str: &str) -> Vec<Token> {
         let mut lexer = Lexer::new();
 
-        for input_str in input_strs {
-            lexer.scan(input_str).expect("lexing should have succeeded");
-        }
+        let tokens = lexer.scan(input_str).expect("lexing should have succeeded");
 
-        lexer
+        tokens
     }
 
     // Do not keep insta::assert_debug_snapshot!(lexer.tokens)
@@ -290,154 +283,154 @@ mod tests {
 
     #[test]
     fn test_simple_cmd_lexing() {
-        let lexer = check(vec!["ls\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_cmd_with_args_lexing() {
-        let lexer = check(vec!["ls -la\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls -la\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_cmd_lexing_of_semicolon_separator() {
-        let lexer = check(vec!["ls -la ; echo foo\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls -la ; echo foo\n");
+        insta::assert_debug_snapshot!(tokens);
 
-        let lexer = check(vec!["ls -la; echo foo\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls -la; echo foo\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_cmd_lexing_of_logical_or() {
-        let lexer = check(vec!["ls -la || echo foo\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls -la || echo foo\n");
+        insta::assert_debug_snapshot!(tokens);
 
-        let lexer = check(vec!["ls -la|| echo foo\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls -la|| echo foo\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_cmd_lexing_of_logical_and() {
-        let lexer = check(vec!["ls -la && echo foo\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls -la && echo foo\n");
+        insta::assert_debug_snapshot!(tokens);
 
-        let lexer = check(vec!["ls -la &&echo foo\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls -la &&echo foo\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_cmd_lexing_with_multiple_separators() {
-        let lexer = check(vec!["false && echo foo || echo bar\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("false && echo foo || echo bar\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_cmd_lexing_of_negate_exit_status() {
-        let lexer = check(vec!["! ls -la && echo foo\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("! ls -la && echo foo\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_subshell_cmds() {
-        let lexer = check(vec!["(! ls -la)&& echo foo\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("(! ls -la)&& echo foo\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_cmd_with_keyword() {
-        let lexer = check(vec!["ls -la&& exit\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls -la&& exit\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_cmd_cd_dot_dot() {
-        let lexer = check(vec!["cd ..\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("cd ..\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_cmd_with_unqualified_path() {
-        let lexer = check(vec!["./ls\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("./ls\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_backslash() {
-        let lexer = check(vec!["echo \\", "foo\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("echo \\\nfoo\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_pipe_op() {
-        let lexer = check(vec!["echo foo | cat | cat\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("echo foo | cat | cat\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_pipe_op_with_redirection_with_fd() {
-        let lexer = check(vec!["ls -6 2> file.txt\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls -6 2> file.txt\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_redirection_without_fd() {
-        let lexer = check(vec!["ls > file.txt\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls > file.txt\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_redirection_op_append_with_fd() {
-        let lexer = check(vec!["ls 6>> file.txt\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls 6>> file.txt\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_redirection_op_append_without_fd() {
-        let lexer = check(vec!["ls >> file.txt\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls >> file.txt\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_redirection_op_diamond_without_fd() {
-        let lexer = check(vec!["ls <> file.txt\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls <> file.txt\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_redirection_op_diamond_with_fd() {
-        let lexer = check(vec!["ls 2<> file.txt\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls 2<> file.txt\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_squirrel_output_op_with_fd() {
-        let lexer = check(vec!["ls /tmp/ doesnotexist 2&>1\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls /tmp/ doesnotexist 2&>1\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_squirrel_output_op_without_fd() {
-        let lexer = check(vec!["ls /tmp/ doesnotexist &>1\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ls /tmp/ doesnotexist &>1\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_squirrel_input_op_with_fd() {
-        let lexer = check(vec!["0<&1\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("0<&1\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_squirrel_input_op_without_fd() {
-        let lexer = check(vec!["<&1\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("<&1\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn test_lexing_of_bg_process_with_ampersand() {
-        let lexer = check(vec!["ping google.com &\n"]);
-        insta::assert_debug_snapshot!(lexer.tokens);
+        let tokens = check("ping google.com &\n");
+        insta::assert_debug_snapshot!(tokens);
     }
 }
