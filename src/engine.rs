@@ -79,37 +79,37 @@ impl Engine {
 
         let mut prompt = Prompt::new();
         // For handling SIGINT
-        while !term.load(Ordering::Relaxed) {
-            let mut lexer = Lexer::new();
-            while !lexer.complete_processing() {
-                // If we have more than 1 tokens
-                // at this stage, we would have parsed
-                // some last cycle, which means we are
-                // in multiline mode
-                if lexer.tokens.len() > 0 {
-                    prompt.activate_multiline_prompt();
-                }
+        // while !term.load(Ordering::Relaxed) {
+        //     let mut lexer = Lexer::new();
+        //     while !lexer.complete_processing() {
+        //         // If we have more than 1 tokens
+        //         // at this stage, we would have parsed
+        //         // some last cycle, which means we are
+        //         // in multiline mode
+        //         if lexer.tokens.len() > 0 {
+        //             prompt.activate_multiline_prompt();
+        //         }
 
-                prompt.render(self.execution_successful)?;
+        //         prompt.render(self.execution_successful)?;
 
-                let mut input_str = String::new();
+        //         let mut input_str = String::new();
 
-                io::stdin().read_line(&mut input_str)?;
+        //         io::stdin().read_line(&mut input_str)?;
 
-                if input_str.trim() == "" {
-                    continue;
-                }
+        //         if input_str.trim() == "" {
+        //             continue;
+        //         }
 
-                lexer.scan(&input_str)?;
+        //         lexer.scan(&input_str)?;
 
-                prompt.deactivate_multiline_prompt();
-            }
+        //         prompt.deactivate_multiline_prompt();
+        //     }
 
-            let break_term_loop = self.parse_and_execute(&lexer.tokens)?;
-            if break_term_loop {
-                break;
-            }
-        }
+        //     let break_term_loop = self.parse_and_execute(&lexer.tokens)?;
+        //     if break_term_loop {
+        //         break;
+        //     }
+        // }
 
         Ok(())
     }

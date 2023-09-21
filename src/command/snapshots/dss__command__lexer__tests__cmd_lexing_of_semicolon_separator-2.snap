@@ -1,6 +1,6 @@
 ---
 source: src/command/lexer.rs
-expression: lexer.tokens
+expression: tokens
 ---
 [
     Token {
@@ -27,9 +27,7 @@ expression: lexer.tokens
     },
     Token {
         lexeme: ";",
-        token_type: Operator(
-            Semicolon,
-        ),
+        token_type: Semicolon,
         line: 0,
         range: (
             6,

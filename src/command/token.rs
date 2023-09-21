@@ -21,6 +21,7 @@ pub enum TokenType {
     LeftParen, // "("
     RightParen, // ")"
     Backslash,
+    Semicolon,  // ";"
 }
 
 impl Display for TokenType {
@@ -31,6 +32,7 @@ impl Display for TokenType {
             TokenType::LeftParen => "(".into(),
             TokenType::RightParen => ")".into(),
             TokenType::Backslash => "\\".into(),
+            TokenType::Semicolon => ";".into(),
         };
 
         write!(f, "{}", variant_str)
@@ -75,7 +77,6 @@ pub enum Operator {
     AndIf, // "&&"
     Or,  // "|"
     OrIf,  // "||"
-    Semicolon,  // ";"
     Exclamation,  // "!"
     LeftPointyBracket,  // "<"
     RightPointyBracket,  // ">"
@@ -90,7 +91,6 @@ impl Display for Operator {
         let variant_str = match self {
             Operator::AndIf => "&&",
             Operator::OrIf => "||",
-            Operator::Semicolon => ";",
             Operator::And => "&",
             Operator::Or => "|",
             Operator::Exclamation => "!",
