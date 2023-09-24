@@ -27,6 +27,14 @@ impl Command {
             })
             .collect()
     }
+
+    pub fn as_string(&self) -> String {
+        self.tokens.iter().fold(String::new(), |mut acc, token| {
+            acc += " ";
+            acc += &token.lexeme;
+            return acc;
+        })
+    }
 }
 
 // Old Lexing + Parsing

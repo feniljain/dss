@@ -32,8 +32,12 @@
 - [X] add support for redirect <& operator
 - [X] add support for fd in redirect operations
 - [ ] add support for $() in shell
-- [ ] add support for & parsing for job control
+- [ ] add support for background processes
+- [X] add support for `jobs` command
+- [ ] add support to bring commands in foreground again
+- [ ] add support for proper process chains i.e. jobs
 - [ ] add support for another execution mode (job control) in engine
+- [ ] seperate types from engine, and into a new file
 
 ## Bonus Tasks:
 

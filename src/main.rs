@@ -10,7 +10,9 @@ use engine::Engine;
 // FIXME: Refine APIs exposed by Engine and Command
 
 fn main() -> anyhow::Result<()> {
-    let mut engine = Engine::new();
+    // FIXME: calculate this using process described here: https://www.gnu.org/software/libc/manual/html_node/Initializing-the-Shell.html
+    let is_interactive = true;
+    let mut engine = Engine::new(is_interactive)?;
 
     engine.fire_on()?;
 
