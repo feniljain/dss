@@ -59,16 +59,6 @@ impl<'a> Parser<'a> {
         Self { tokens, idx: 0 }
     }
 
-    // There are two types of parsing modes:
-    // - First, breaking on separators( i.e. &&, ||, etc ).
-    // These ones return ls && echo as:
-    //  - ls &&
-    //  - echo
-    // - Second, preemptively taking one argument in cases
-    // like redirection, cause we can be sure over there that
-    // there will only be one path/token after redirection
-    // operator, so a command like: ls > file2
-    // will be returned in parse_result as ls > file2 together
     pub fn get_command(&mut self) -> anyhow::Result<Option<ParseResult>> {
         if self.idx >= self.tokens.len() {
             // all commands are done
@@ -480,7 +470,7 @@ impl Display for OpType {
 
 #[cfg(test)]
 mod tests {
-    use crate::command::{lexer::Lexer, token::Token};
+    use crate::command::{lexer::{Lexer, self}, token::Token};
 
     use super::{ParseResult, Parser};
 
@@ -494,171 +484,171 @@ mod tests {
         Ok(results)
     }
 
-    fn get_tokens(input_str: &str) -> anyhow::Result<Lexer> {
+    fn get_tokens(input_str: &str) -> anyhow::Result<Vec<Token>> {
         let mut lexer = Lexer::new();
-        lexer.scan(input_str)?;
-        Ok(lexer)
+        let tokens = lexer.scan(input_str)?;
+        Ok(tokens)
     }
 
     #[test]
     fn test_simple_cmd_parsing() {
-        let lexer = get_tokens("ls\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("ls\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_with_args_parsing() {
-        let lexer = get_tokens("ls -la\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("ls -la\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_with_unqualified_path() {
-        let lexer = get_tokens("./ls -la\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("./ls -la\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_with_semicolon_separator() {
-        let lexer = get_tokens("ls -la ; echo foo\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("ls -la ; echo foo\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_with_or_if_separator() {
-        let lexer = get_tokens("ls -la || echo foo\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("ls -la || echo foo\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_with_and_if_separator() {
-        let lexer = get_tokens("ls -la && ./echo foo\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("ls -la && ./echo foo\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_with_multiple_separators() {
-        let lexer =
-            get_tokens("false && echo foo || echo bar\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens =
+            get_tokens("false && echo foo || echo bar\n").expect("tokens failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_of_exit_term() {
-        let lexer = get_tokens("ls -la && exit\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("ls -la && exit\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_of_subshell() {
-        let lexer = get_tokens("(ls && exit)\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("(ls && exit)\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
 
-        let lexer = get_tokens("(ls && exit) && ls\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("(ls && exit) && ls\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_of_pipe_ops() {
-        let lexer = get_tokens("echo foo | cat | cat\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("echo foo | cat | cat\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_of_redirection_ops_with_fd() {
-        let lexer = get_tokens("ls -6 2> file.txt\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("ls -6 2> file.txt\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_of_redirection_ops_without_fd() {
-        let lexer = get_tokens("ls -6> file.txt\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("ls -6> file.txt\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_of_redirection_append_ops_without_fd() {
-        let lexer = get_tokens("ls -la >> file.txt\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("ls -la >> file.txt\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_of_redirection_append_ops_with_fd() {
-        let lexer = get_tokens("ls -la 2>> file.txt\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("ls -la 2>> file.txt\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_of_redirection_read_write_ops_without_fd() {
-        let lexer = get_tokens("ls -la <> file.txt\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("ls -la <> file.txt\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_of_redirection_read_write_ops_with_fd() {
-        let lexer = get_tokens("ls -la 2<> file.txt\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("ls -la 2<> file.txt\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_of_redirection_squirrel_output_ops_with_fd() {
-        let lexer =
-            get_tokens("ls /tmp/ doesnotexist 2&>1\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens =
+            get_tokens("ls /tmp/ doesnotexist 2&>1\n").expect("tokens failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_of_redirection_squirrel_output_ops_without_fd() {
-        let lexer =
-            get_tokens("ls /tmp/ doesnotexist &>1\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens =
+            get_tokens("ls /tmp/ doesnotexist &>1\n").expect("tokens failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_of_redirection_squirrel_output_ops_with_minus() {
-        let lexer =
-            get_tokens("ls /tmp/ doesnotexist &>1\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens =
+            get_tokens("ls /tmp/ doesnotexist &>1\n").expect("tokens failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_of_redirection_squirrel_input_ops_with_fd() {
-        let lexer = get_tokens("ls 0<&1\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("ls 0<&1\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_of_redirection_squirrel_input_ops_without_fd() {
-        let lexer = get_tokens("ls <&1\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("ls <&1\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 
     #[test]
     fn test_cmd_parsing_for_bg_process_invocation() {
-        let lexer = get_tokens("ping google.com &\n").expect("lexer failed, check lexer tests");
-        let results = check(&lexer.tokens).expect("parser failed :(");
+        let tokens = get_tokens("ping google.com &\n").expect("lexer failed, check lexer tests");
+        let results = check(&tokens).expect("parser failed :(");
         insta::assert_debug_snapshot!(results);
     }
 }

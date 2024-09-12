@@ -7,3 +7,4 @@
 - https://www.howtogeek.com/440848/how-to-run-and-control-background-processes-on-linux/
 - https://wiki.bash-hackers.org/howto/redirection_tutorial
 - https://stackoverflow.com/questions/8319484/regarding-background-processes-using-fork-and-child-processes-in-my-dummy-shel
+- https://github.com/denoland/deno_task_shell/
